@@ -84,6 +84,9 @@ export const createRow = async (
   return result[0];
 };
 
+// ✅ CREATE column
+
+
 // ✅ UPDATE row
 export const updateRow = async (
   tableName: string,
