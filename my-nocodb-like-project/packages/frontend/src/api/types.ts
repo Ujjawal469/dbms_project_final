@@ -5,6 +5,7 @@ export interface ApiColumnSchema {
     type: string;
     isPrimaryKey: boolean;
     isNullable: boolean;
+    isForeignKey: boolean;
     // Add other properties returned by your meta.service.getTableSchema
 }
 

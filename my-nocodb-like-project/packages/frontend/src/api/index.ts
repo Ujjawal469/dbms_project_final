@@ -46,6 +46,7 @@ export const updateRecord = async (
 ): Promise<any> => {
   const encodedPk = encodeURIComponent(String(pkValue));
   const res = await apiClient.put(`/data/tables/${tableName}/${encodedPk}`, data);
+  console.log('hi', res);
   return res.data;
 };
 
