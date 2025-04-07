@@ -1,8 +1,12 @@
+// src/components/DataGrid.tsx
+
 import React, { useState, useEffect, useMemo } from 'react';
-import { Table, Spin, Alert, Empty, Pagination, Button } from 'antd';
+import { Table, Spin, Alert, Empty, Pagination, Button, Modal } from 'antd';
 import { ColumnsType } from 'antd/es/table';
 import * as api from '../../api';
-import { ApiColumnSchema } from '../../api/types';
+import { ApiColumnSchema } from '../api/types';
+
+const { confirm } = Modal;
 
 interface DataGridProps {
   tableName: string | null;
@@ -19,7 +23,6 @@ const DataGrid: React.FC<DataGridProps> = ({ tableName }) => {
   const [error, setError] = useState<string | null>(null);
   const [primaryKeyName, setPrimaryKeyName] = useState<string | null>(null);
 
-  // Fetch table schema
   useEffect(() => {
     if (!tableName) {
       setSchema([]);
@@ -50,7 +53,6 @@ const DataGrid: React.FC<DataGridProps> = ({ tableName }) => {
       .finally(() => setLoadingSchema(false));
   }, [tableName]);
 
-  // Fetch table data
   useEffect(() => {
     if (!tableName || loadingSchema) return;
 
@@ -61,9 +63,10 @@ const DataGrid: React.FC<DataGridProps> = ({ tableName }) => {
       .then((response) => {
         const processedData = response.data.map((row, index) => ({
           ...row,
-          key: primaryKeyName && row[primaryKeyName] !== undefined
-            ? `${row[primaryKeyName]}` // make sure it's a string key
-            : `row-${currentPage}-${index}`, // predictable, not random
+          key:
+            primaryKeyName && row[primaryKeyName] !== undefined
+              ? String(row[primaryKeyName])
+              : `row-${currentPage}-${index}`,
         }));
         setData(processedData);
         setTotalRows(response.total);
@@ -76,28 +79,27 @@ const DataGrid: React.FC<DataGridProps> = ({ tableName }) => {
       .finally(() => setLoadingData(false));
   }, [tableName, currentPage, pageSize, loadingSchema, primaryKeyName]);
 
+  const handleDelete = (primaryKeyValue: string | number) => {
+    if (!tableName || !primaryKeyName) return;
 
-    //handle delete
-    const handleDelete = (primaryKeyValue: string | number) => {
-      if (!tableName || !primaryKeyName) return;
-  
-      confirm({
-        title: 'Are you sure you want to delete this record?',
-        onOk: () => {
-          api
-            .deleteRecord(tableName, primaryKeyValue)
-            .then(() => {
-              setData((prevData) => prevData.filter((item) => item[primaryKeyName] !== primaryKeyValue));
-              setTotalRows((prevTotal) => prevTotal - 1);
-            })
-            .catch((err) => {
-              setError(`Failed to delete record: ${err.message}`);
-            });
-        },
-      });
-    };
+    confirm({
+      title: 'Are you sure you want to delete this record?',
+      onOk: () => {
+        api
+          .deleteRecord(tableName, primaryKeyValue)
+          .then(() => {
+            setData((prev) =>
+              prev.filter((item) => item[primaryKeyName] !== primaryKeyValue)
+            );
+            setTotalRows((prev) => prev - 1);
+          })
+          .catch((err) => {
+            setError(`Failed to delete record: ${err.message}`);
+          });
+      },
+    });
+  };
 
-  // Build table columns
   const columns = useMemo((): ColumnsType<any> => {
     if (!schema || schema.length === 0) return [];
 
@@ -114,17 +116,16 @@ const DataGrid: React.FC<DataGridProps> = ({ tableName }) => {
       generatedCols.push({
         title: 'Actions',
         key: 'actions',
-        width: 100,
         fixed: 'right',
+        width: 100,
         render: (_, record) => (
-          <span>
+          <>
             <Button
               type="link"
               size="small"
-              onClick={() => {
-                console.log('Editing', record[primaryKeyName]);
-                alert(`Edit ${primaryKeyName}=${record[primaryKeyName]}`);
-              }}
+              onClick={() =>
+                alert(`Edit ${primaryKeyName}=${record[primaryKeyName]}`)
+              }
             >
               Edit
             </Button>
@@ -132,17 +133,17 @@ const DataGrid: React.FC<DataGridProps> = ({ tableName }) => {
               type="link"
               size="small"
               danger
-              danger
               onClick={() => handleDelete(record[primaryKeyName])}
             >
               Delete
             </Button>
-          </span>
+          </>
         ),
       });
     }
 
-  // --- Render ---
+    return generatedCols;
+  }, [schema, primaryKeyName]);
 
   if (!tableName) {
     return <Empty description="Select a table from the sidebar" />;
@@ -167,17 +168,13 @@ const DataGrid: React.FC<DataGridProps> = ({ tableName }) => {
       />
     );
   }
-     return (
+
+  return (
     <div>
       <h2 style={{ marginBottom: '16px' }}>Table: {tableName}</h2>
 
       {error && loadingData && (
-        <Alert
-          message={error}
-          type="warning"
-          showIcon
-          style={{ marginBottom: '10px' }}
-        />
+        <Alert message={error} type="warning" showIcon style={{ marginBottom: '10px' }} />
       )}
 
       <Button style={{ marginBottom: '10px' }} disabled={!primaryKeyName}>
@@ -216,6 +213,6 @@ const DataGrid: React.FC<DataGridProps> = ({ tableName }) => {
       )}
     </div>
   );
-});
+};
 
 export default DataGrid;
