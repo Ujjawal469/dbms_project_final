@@ -267,3 +267,30 @@ export const deleteTable = async (tableName: string): Promise<void> => {
     throw handleApiError(err as AxiosError | Error, `deleteTable(${tableName})`);
   }
 };
+
+//----------------------- rename table --------------------------------------
+export const renameTable = async (oldTableName: string, newTableName: string): Promise<{ message: string, oldTableName: string, newTableName: string }> => {
+  if (!oldTableName || oldTableName.trim().length === 0) throw new Error("Current table name cannot be empty.");
+  if (!newTableName || newTableName.trim().length === 0) throw new Error("New table name cannot be empty.");
+  if (oldTableName.trim() === newTableName.trim()) throw new Error("New name cannot be the same as the old name.");
+
+  try {
+    const trimmedOldName = oldTableName.trim();
+    const trimmedNewName = newTableName.trim();
+    const encodedOldName = encodeURIComponent(trimmedOldName);
+
+    console.log(`API: Renaming table "${trimmedOldName}" to "${trimmedNewName}"...`);
+
+    // Use PATCH method
+    const response = await apiClient.patch<{ message: string, oldTableName: string, newTableName: string }>(
+        `/meta/tables/${encodedOldName}`, // Pass old name in URL
+        { newTableName: trimmedNewName }, // Pass new name in request body
+        { withCredentials: true } // Requires authentication
+    );
+    console.log(`API: Table rename request sent successfully for "${trimmedOldName}".`);
+    return response.data; // Return backend confirmation message and names
+  } catch (err) {
+    // Handle API errors, including 404, 403, 409 Conflict etc.
+    throw handleApiError(err as AxiosError | Error, `renameTable(${oldTableName}, ${newTableName})`);
+  }
+};

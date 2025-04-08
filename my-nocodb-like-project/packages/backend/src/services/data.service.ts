@@ -28,7 +28,7 @@ export const getData = async (
     if (!currentSchema || currentSchema.length === 0) {
          throw new Error(`Could not retrieve schema for table "${tableName}" after potential modification.`);
     }
-    const columnList = currentSchema.filter(col => col.name !== "serial_num").map(col => `"${col.name}"`).join(', ');
+    const columnList = currentSchema.map(col => `"${col.name}"`).join(', ');
     const dataSql = `SELECT ${columnList} FROM ${safeTableName} ORDER BY "serial_num" LIMIT $1 OFFSET $2`;
 
     const data = await prisma.$queryRawUnsafe<any[]>(dataSql, options.limit, options.offset);
@@ -70,29 +70,29 @@ export const createRow = async (
   console.log(`Creating row in table: ${tableName}`, rowData);
 
   if (!/^[a-zA-Z0-9_]+$/.test(tableName)) {
+    console.error(`Invalid table name format attempted: ${tableName}`);
     throw new Error(`Invalid table name format: ${tableName}`);
   }
 
   const columnsToInsert: string[] = [];
   const valuesToInsert: any[] = [];
+
   for (const key in rowData) {
-    if (key !== 'serial_num' && Object.prototype.hasOwnProperty.call(rowData, key)) {
+    if (Object.prototype.hasOwnProperty.call(rowData, key)) {
       columnsToInsert.push(key);
       valuesToInsert.push(rowData[key]);
     }
   }
 
   if (columnsToInsert.length === 0) {
-    throw new Error('No data provided for insertion (excluding serial_num).');
+    throw new Error('No data provided for insertion.');
   }
 
-  const columnList = columnsToInsert.map((col) => `"${col}"`).join(', '); // Creating collist (serial_num, col1, col2, ...)
-  // Create placeholders starting from $1
-  const placeholders = columnsToInsert.map((_, i) => `$${i + 1}`).join(', '); // Creating placeholders starting from $1
+  const columnList = columnsToInsert.map((col) => `"${col}"`).join(', ');
+  const placeholders = columnsToInsert.map((_, i) => `$${i + 1}`).join(', ');
   const insertSql = `INSERT INTO "${tableName}" (${columnList}) VALUES (${placeholders}) RETURNING *`;
 
   console.log(`Executing SQL: ${insertSql} with values:`, valuesToInsert);
-
   try {
     const result = await prisma.$queryRawUnsafe<any[]>(
       insertSql,
@@ -108,18 +108,26 @@ export const createRow = async (
 
   } catch (error: any) {
     console.error(`Error creating row in table ${tableName}:`, error);
+
     if (error instanceof Prisma.PrismaClientKnownRequestError) {
-      if (error.code === 'P2002' || error.code === 'P2003' || error.code === '23505' || error.code === '23503' || error.code === '23502') {
-        throw new Error(`Database constraint violation while inserting into "${tableName}". Check data validity. DB Error: ${error.message}`);
+      if (error.code === 'P2002' || error.meta?.code === '23505') { 
+         throw new Error(`Unique constraint violation in table "${tableName}". A record with this identifier (e.g., 'serial_num') might already exist. DB Error: ${error.message}`);
       }
-      if (error.code === 'P2025' || error.meta?.cause?.includes("does not exist")) { 
+      // Foreign key constraint violation
+      if (error.code === 'P2003' || error.meta?.code === '23503') {
+         throw new Error(`Foreign key constraint violation in table "${tableName}". Referenced row does not exist. DB Error: ${error.message}`);
+      }
+       if (error.meta?.code === '23502') {
+         throw new Error(`Not-null constraint violation in table "${tableName}". A required column is missing or null. DB Error: ${error.message}`);
+      }
+      if (error.code === 'P2025' || error.code === 'P2010') {
          throw new Error(`Table "${tableName}" not found.`);
       }
     }
-     if (error.code === 'P2010' || error.meta?.code === '42P01') {
-        throw new Error(`Table "${tableName}" not found. (DB Code: ${error.meta?.code})`);
+     if (error.code === '42P01') { 
+        throw new Error(`Table "${tableName}" not found. (DB Code: 42P01)`);
      }
-    throw new Error(`Could not insert data into table "${tableName}".`);
+    throw new Error(`Could not insert data into table "${tableName}". Original error: ${error.message || error}`);
   }
 };
 

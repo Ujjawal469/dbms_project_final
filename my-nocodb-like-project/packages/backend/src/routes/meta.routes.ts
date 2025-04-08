@@ -8,5 +8,6 @@ router.post('/tables', metaController.addTable);
 router.get('/tables/:tableName/schema', metaController.getSchemaForTable);
 router.post('/tables/:tableName/columns', metaController.addColumnToTable);
 router.delete('/tables/:tableName', metaController.deleteTable);
+router.patch('/tables/:oldTableName', metaController.renameTable);
 
 export default router;
