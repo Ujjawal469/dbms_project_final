@@ -1,5 +1,5 @@
 import { prisma } from '../config/db';
-
+import * as metaService from './meta.service';
 interface PaginationOptions {
   limit: number;
   offset: number;
@@ -22,10 +22,17 @@ export const getData = async (
     const countSql = `SELECT COUNT(*) FROM ${safeTableName}`;
     const countResult = await prisma.$queryRawUnsafe<{ count: bigint }[]>(countSql);
     const total = Number(countResult[0]?.count ?? 0);
+    const currentSchema = await metaService.getTableSchema(tableName); // Fetch schema
+    if (!currentSchema || currentSchema.length === 0) {
+         throw new Error(`Could not retrieve schema for table "${tableName}" after potential modification.`);
+    }
+    // Dynamically build column list, ensuring quoting
+    const columnList = currentSchema.map(col => `"${col.name}"`).join(', ');
 
-    const dataSql = `SELECT * FROM ${safeTableName} ORDER BY ctid LIMIT $1 OFFSET $2`;
+    // Use the explicit column list instead of '*'
+    const dataSql = `SELECT ${columnList} FROM ${safeTableName} ORDER BY "serial_num" LIMIT $1 OFFSET $2`;
+
     const data = await prisma.$queryRawUnsafe<any[]>(dataSql, options.limit, options.offset);
-
     return { data, total };
   } catch (error: any) {
     console.error(`Error fetching data for table ${tableName}:`, error);
@@ -109,8 +116,8 @@ export const updateRow = async (
 
   const setClause = columns.map((col, i) => `"${col}" = $${i + 1}`).join(', ');
   const updateSql = `UPDATE "${tableName}" SET ${setClause} WHERE "${pkColumn}" = $${columns.length + 1} RETURNING *`;
-
-  const result = await prisma.$queryRawUnsafe<any[]>(updateSql, ...values, pkValue);
+  let pkvalue = BigInt(pkValue);
+  const result = await prisma.$queryRawUnsafe<any[]>(updateSql, ...values, pkvalue);
 
   if (!result || result.length === 0) {
     throw new Error('Record not found.');
@@ -132,7 +139,7 @@ export const deleteRow = async (
   }
 
   const deleteSql = `DELETE FROM "${tableName}" WHERE "${pkColumn}" = $1`;
-
-  const result = await prisma.$executeRawUnsafe(deleteSql, pkValue);
+  let pkvalue = BigInt(pkValue);
+  const result = await prisma.$executeRawUnsafe(deleteSql, pkvalue);
   return { deleted: result > 0 };
 };

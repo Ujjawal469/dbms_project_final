@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import * as dataService from '../services/data.service';
+import { convertBigIntsToStrings } from '../utils/jsonUtils';
 
 export const getTableData = async (req: Request, res: Response) => {
     try {
@@ -21,7 +22,8 @@ export const getTableData = async (req: Request, res: Response) => {
         }
 
         const result = await dataService.getData(tableName, { limit, offset });
-        res.status(200).json(result); // Expects { data: [...], total: ... }
+        const final = convertBigIntsToStrings(result);
+        res.status(200).json(final); // Expects { data: [...], total: ... }
     } catch (error: any) {
         console.error('Error fetching table data:', error);
         res.status(500).json({ message: 'Internal server error', error: error.message });
@@ -43,7 +45,8 @@ export const addRow = async (req: Request, res: Response) => {
         }
 
         const newRow = await dataService.createRow(tableName, rowData);
-        res.status(201).json(newRow);
+        const final = convertBigIntsToStrings(newRow);
+        res.status(201).json(final);
     } catch (error: any) {
         console.error('Error adding row:', error);
         res.status(500).json({ message: 'Internal server error', error: error.message });
@@ -70,7 +73,8 @@ export const updateExistingRow = async (req: Request, res: Response) => {
         }
 
         const updatedRow = await dataService.updateRow(tableName, pkValue, pkColumn, rowData);
-        res.status(200).json(updatedRow);
+        const final = convertBigIntsToStrings(updatedRow);
+        res.status(200).json(final);
     } catch (error: any) {
         console.error('Error updating row:', error);
         res.status(500).json({ message: 'Internal server error', error: error.message });
