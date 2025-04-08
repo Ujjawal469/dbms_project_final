@@ -270,14 +270,6 @@ export const deleteTableAndAssociation = async (userId: number, rawTableName: st
       throw error;
   }
 
-  // Prevent deleting core tables
-  const protectedTables = ['users', 'users_tables'];
-  if (protectedTables.includes(tableName.toLowerCase())) {
-       const error = new Error(`Cannot delete protected system table "${tableName}".`);
-       (error as any).statusCode = 403;
-       throw error;
-  }
-
   try {
       await prisma.$transaction(async (tx) => {
           console.log(`TX: Deleting association for User ${userId}, Table ${tableName}`);
