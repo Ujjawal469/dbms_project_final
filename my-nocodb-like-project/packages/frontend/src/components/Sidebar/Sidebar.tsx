@@ -432,7 +432,7 @@ const Sidebar: React.FC<SidebarProps> = ({ selectedTable, onSelectTable, onCreat
         if (!Array.isArray(data)) {
             throw new Error("Invalid table list format received.");
         }
-        setTables(data.sort());
+        setTables(data);
         setError(null);
         // Notify parent AFTER successful fetch and state update
         if (onTableListChange) onTableListChange();
@@ -746,9 +746,9 @@ const Sidebar: React.FC<SidebarProps> = ({ selectedTable, onSelectTable, onCreat
             >
                 {/* Keep existing Add Table Form */}
                 <p style={{ marginBottom: '15px', fontSize: '13px', color: '#666' }}>
-                    Enter a unique name for your new table. Basic structure will be created.
+                    Enter a unique name for your new table.
                     <br/>
-                    <strong style={{color:'darkred'}}>Warning:</strong> Use valid database identifier rules.
+                    <strong style={{color:'darkred'}}>Warning:</strong> Do not use reserved keywords.
                 </p>
                 <Form form={addTableForm} layout="vertical" name="add_table_form">
                     <Form.Item

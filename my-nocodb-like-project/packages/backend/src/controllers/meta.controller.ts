@@ -18,15 +18,16 @@ export const addTable = async (req: Request, res: Response, next: NextFunction) 
         }
 
         const trimmedTableName = tableName.trim();
-        console.log(`CONTROLLER: Attempting to CREATE table "${trimmedTableName}" for User ${userId}`);
+        const finalTableName = trimmedTableName + "_" + userId;
+        console.log(`CONTROLLER: Attempting to CREATE table "${finalTableName}" for User ${userId}`);
 
-        await metaService.createAndAssociateTable(userId, trimmedTableName);
+        await metaService.createAndAssociateTable(userId, finalTableName);
 
-        console.log(`CONTROLLER: Table "${trimmedTableName}" created and associated successfully for User ${userId}`);
+        console.log(`CONTROLLER: Table "${finalTableName}" created and associated successfully for User ${userId}`);
 
         res.status(201).json({
-            message: `Table "${trimmedTableName}" created successfully with a 'serial_num' primary key and associated with your user.`,
-            tableName: trimmedTableName
+            message: `Table "${trimmedTableName}" created successfully.`,
+            tableName: finalTableName
         });
 
     } catch (error: any) {
@@ -45,7 +46,8 @@ export const listTables = async (req: Request, res: Response) => {
         }
 
         const tables = await metaService.getTables(userId);
-        res.status(200).json(tables);
+        const trimmedTables = tables.map(name => name.includes('_') ? name.slice(0, name.lastIndexOf('_')) : name);
+        res.status(200).json(trimmedTables);
     } catch (error: any) {
         console.error('Error listing tables:', error);
         res.status(500).json({ message: error.message || 'Failed to list tables' });
@@ -63,11 +65,12 @@ export const getSchemaForTable = async (req: Request, res: Response) => {
         if (!tableName) {
             return res.status(400).json({ message: 'Table name parameter is required.' });
         }
-        console.log(`CONTROLLER: Getting schema for ${tableName}`);
-        const schema = await metaService.getTableSchema(tableName);
+        const finalTableName = tableName + "_" + userId;
+        console.log(`CONTROLLER: Getting schema for ${finalTableName}`);
+        const schema = await metaService.getTableSchema(finalTableName);
         res.status(200).json(schema);
     } catch (error: any) {
-        console.error(`CONTROLLER Error fetching schema for ${req.params.tableName}:`, error);
+        console.error(`CONTROLLER Error fetching schema for ${req.params.final}:`, error);
         let statusCode = 500;
         if (error.message.toLowerCase().includes('invalid table name')) {
              statusCode = 400;
@@ -96,11 +99,11 @@ export const addColumnToTable = async (req: Request, res: Response) => {
         if (!columnData || typeof columnData !== 'object' || !columnData.name || !columnData.type) {
             return res.status(400).json({ message: 'Invalid request body. Column name and type are required.' });
         }
-
-        console.log(`CONTROLLER: Attempting to add column to ${tableName}`, columnData);
-        await metaService.addColumn(tableName, columnData);
-        console.log(`CONTROLLER: Column added successfully via service for ${tableName}`);
-        res.status(201).json({ message: `Column "${columnData.name}" added successfully to table "${tableName}".` });
+        const finalTableName = tableName + "_" + userId;
+        console.log(`CONTROLLER: Attempting to add column to ${finalTableName}`, columnData);
+        await metaService.addColumn(finalTableName, columnData);
+        console.log(`CONTROLLER: Column added successfully via service for ${finalTableName}`);
+        res.status(201).json({ message: `Column "${columnData.name}" added successfully to table "${finalTableName}".` });
 
     } catch (error: any) {
         console.error(`CONTROLLER ERROR (addColumnToTable - ${req.params.tableName}):`, error);
@@ -137,11 +140,12 @@ export const deleteTable = async (req: Request, res: Response, next: NextFunctio
         }
 
         const trimmedTableName = tableName.trim();
-        console.log(`CONTROLLER: Attempting to DELETE table "${trimmedTableName}" for User ${userId}`);
+        const finalTableName = tableName + "_" + userId;
+        console.log(`CONTROLLER: Attempting to DELETE table "${finalTableName}" for User ${userId}`);
 
-        await metaService.deleteTableAndAssociation(userId, trimmedTableName);
+        await metaService.deleteTableAndAssociation(userId, finalTableName);
 
-        console.log(`CONTROLLER: Table "${trimmedTableName}" deleted successfully for User ${userId}`);
+        console.log(`CONTROLLER: Table "${finalTableName}" deleted successfully for User ${userId}`);
 
         res.status(204).send(); 
     } catch (error: any) {

@@ -18,8 +18,8 @@ export const getTableData = async (req: Request, res: Response) => {
         if (!tableName) {
             return res.status(400).json({ message: 'Table name parameter is required.' });
         }
-
-        const result = await dataService.getData(tableName, { limit, offset });
+        const finalTableName = tableName + "_" + userId;
+        const result = await dataService.getData(finalTableName, { limit, offset });
         const final = convertBigIntsToStrings(result);
         res.status(200).json(final); // Expects { data: [...], total: ... }
     } catch (error: any) {
@@ -41,8 +41,8 @@ export const addRow = async (req: Request, res: Response) => {
         if (!tableName || !rowData || typeof rowData !== 'object') {
             return res.status(400).json({ message: 'Invalid request.' });
         }
-
-        const newRow = await dataService.createRow(tableName, rowData);
+        const finalTableName = tableName + "_" + userId;
+        const newRow = await dataService.createRow(finalTableName, rowData);
         const final = convertBigIntsToStrings(newRow);
         res.status(201).json(final);
     } catch (error: any) {
@@ -64,13 +64,13 @@ export const updateExistingRow = async (req: Request, res: Response) => {
         if (!tableName || !pkValue || !rowData || typeof rowData !== 'object') {
             return res.status(400).json({ message: 'Invalid request.' });
         }
-
-        const pkColumn = await dataService.getPrimaryKeyColumn(tableName);
+        const finalTableName = tableName + "_" + userId;
+        const pkColumn = await dataService.getPrimaryKeyColumn(finalTableName);
         if (!pkColumn) {
-            return res.status(400).json({ message: `Cannot determine primary key for table "${tableName}".` });
+            return res.status(400).json({ message: `Cannot determine primary key for table "${finalTableName}".` });
         }
 
-        const updatedRow = await dataService.updateRow(tableName, pkValue, pkColumn, rowData);
+        const updatedRow = await dataService.updateRow(finalTableName, pkValue, pkColumn, rowData);
         const final = convertBigIntsToStrings(updatedRow);
         res.status(200).json(final);
     } catch (error: any) {
@@ -91,13 +91,13 @@ export const deleteExistingRow = async (req: Request, res: Response) => {
         if (!tableName || !pkValue) {
             return res.status(400).json({ message: 'Invalid request.' });
         }
-
-        const pkColumn = await dataService.getPrimaryKeyColumn(tableName);
+        const finalTableName = tableName + "_" + userId;
+        const pkColumn = await dataService.getPrimaryKeyColumn(finalTableName);
         if (!pkColumn) {
-            return res.status(400).json({ message: `Cannot determine primary key for table "${tableName}".` });
+            return res.status(400).json({ message: `Cannot determine primary key for table "${finalTableName}".` });
         }
 
-        const result = await dataService.deleteRow(tableName, pkValue, pkColumn);
+        const result = await dataService.deleteRow(finalTableName, pkValue, pkColumn);
 
         if (result.deleted) {
             res.status(204).send();
