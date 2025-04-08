@@ -5,9 +5,56 @@ import * as metaService from '../services/meta.service'; // Ensure path is corre
 
 // --- Existing Controller Functions ---
 
+export const addTable = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const userId = req.session?.userId;
+        const { tableName } = req.body; // Get table name from request body
+
+        // 1. Check Authentication
+        if (!userId) {
+            console.warn('Attempt to add table without authentication.');
+            return res.status(401).json({ message: 'Unauthorized. Please log in.' });
+        }
+
+        // 2. Basic Input Validation (Service layer does stricter validation)
+        if (!tableName || typeof tableName !== 'string' || tableName.trim().length === 0) {
+            return res.status(400).json({ message: 'Table name is required in the request body.' });
+        }
+
+        const trimmedTableName = tableName.trim();
+        console.log(`CONTROLLER: Attempting to CREATE table "${trimmedTableName}" for User ${userId}`);
+
+        // 3. Call the service function to create the table AND associate it
+        await metaService.createAndAssociateTable(userId, trimmedTableName);
+
+        console.log(`CONTROLLER: Table "${trimmedTableName}" created and associated successfully for User ${userId}`);
+
+        // 4. Send Success Response
+        res.status(201).json({
+            message: `Table "${trimmedTableName}" created successfully with a 'serial_num' primary key and associated with your user.`,
+            tableName: trimmedTableName
+        });
+
+    } catch (error: any) {
+        console.error(`CONTROLLER ERROR (addTable - Create):`, error);
+        // Pass error to the global error handler which will set appropriate status code
+        next(error);
+    }
+};
+
 export const listTables = async (req: Request, res: Response) => {
     try {
-        const tables = await metaService.getTables();
+        const userId = req.session?.userId;
+
+        if (!userId) {
+            // If userId is not found in the session, the user is not logged in
+            console.warn('Attempt to list tables without authentication.');
+            return res.status(401).json({ message: 'Unauthorized. Please log in.' });
+        }
+        // --- End Retrieve userId ---
+
+        // Call the service function with the logged-in user's ID
+        const tables = await metaService.getTables(userId);
         res.status(200).json(tables);
     } catch (error: any) {
         console.error('Error listing tables:', error);
@@ -18,6 +65,11 @@ export const listTables = async (req: Request, res: Response) => {
 
 export const getSchemaForTable = async (req: Request, res: Response) => {
     try {
+        const userId = req.session?.userId; // Get userId for potential validation
+
+        if (!userId) {
+             return res.status(401).json({ message: 'Unauthorized. Please log in.' });
+        }
         const { tableName } = req.params;
 
         if (!tableName) {
@@ -45,6 +97,11 @@ export const getSchemaForTable = async (req: Request, res: Response) => {
 
 export const addColumnToTable = async (req: Request, res: Response) => {
     try {
+        const userId = req.session?.userId; // Get userId for validation
+
+        if (!userId) {
+             return res.status(401).json({ message: 'Unauthorized. Please log in.' });
+        }
         const { tableName } = req.params;
         const columnData = req.body; // Request body contains { name: '...', type: '...' }
 

@@ -4,7 +4,9 @@ import axios, { AxiosError } from 'axios'; // Import AxiosError for better typin
 import {
   ApiColumnSchema,
   ApiFetchDataResponse,
-  NewColumnPayload // Import the new type
+  NewColumnPayload,
+  LoginCredentials,
+  SignupCredentials
 } from './types';
 
 // --- API Base URL Setup (Ensure VITE_API_URL is set in your .env file) ---
@@ -53,12 +55,87 @@ const handleApiError = (error: AxiosError | Error, context: string): Error => {
   return customError;
 };
 
+//----checking Login status ----------
+export const checkLoginStatus = async (): Promise<boolean> => { // Returns true if logged in, throws error otherwise
+  try {
+    console.log("API: Checking login status...");
+    // Option 2: Selective withCredentials
+    let isLoggedIn = await apiClient.get('user/isLoggedIn', { withCredentials: true });
+    console.log("API: User is logged in.");
+    return true; // Success means logged in
+  } catch (err) {
+    // Let handleApiError decide if it's a real error or just 'not logged in'
+    const processedError = handleApiError(err as AxiosError | Error, 'checkLoginStatus');
+    // If it's the specific "User not logged in" error, return false
+    if (processedError.message === "User not logged in") {
+        return false;
+    }
+    // Otherwise, re-throw it as a real error
+    throw processedError;
+  }
+};
+
+// --- Login User ---
+// Define LoginCredentials in './types' e.g.: export interface LoginCredentials { email: string; password: string; }
+export const loginUser = async (credentials: LoginCredentials): Promise<any> => { // Consider defining a User type for the return
+  try {
+    console.log("API: Attempting login...");
+    const response = await apiClient.post('/user/login', credentials, { withCredentials: true }); // Option 2: Selective
+    console.log("API: Login successful.");
+    return response.data; // Return user data or success message from backend
+  } catch (err) {
+    throw handleApiError(err as AxiosError | Error, 'loginUser');
+  }
+};
+
+
+//------signup-user----------
+export const signupUser = async (credentials: SignupCredentials): Promise<any> => { // Return type might be User or just success confirmation
+  // Basic client-side validation (optional, but good practice)
+  if (!credentials.username || !credentials.email || !credentials.password) {
+      throw new Error("Username, email, and password are required for signup.");
+  }
+  try {
+      console.log("API: Attempting signup...");
+      // Ensure endpoint matches your backend route (e.g., '/auth/signup', '/users', etc.)
+      const response = await apiClient.post('/user/signup', credentials, { withCredentials: true });
+      console.log("API: Signup successful.");
+      // Backend might return the new user object or a confirmation message
+      return response.data;
+  } catch (err) {
+      // Let handleApiError process backend errors (like duplicate email/username)
+      throw handleApiError(err as AxiosError | Error, 'signupUser');
+  }
+};
+
+
+//---------add table --------------
+
+export const addTable = async (tableName: string): Promise<{ message: string, tableName: string }> => {
+  if (!tableName || tableName.trim().length === 0) {
+    throw new Error("Table name cannot be empty.");
+  }
+  try {
+    const trimmedTableName = tableName.trim();
+    console.log(`API: Adding table entry "${trimmedTableName}"...`);
+    const response = await apiClient.post<{ message: string, tableName: string }>(
+        '/meta/tables',
+        { tableName: trimmedTableName }, // Send name in request body
+        { withCredentials: true } // Requires authentication
+    );
+    console.log(`API: Table entry "${trimmedTableName}" added successfully.`);
+    return response.data; // Return backend confirmation message and name
+  } catch (err) {
+    throw handleApiError(err as AxiosError | Error, `addTable(${tableName})`);
+  }
+};
+
 
 // --- Fetch Table Names ---
 export const fetchTables = async (): Promise<string[]> => {
   try {
     console.log("API: Fetching tables...");
-    const res = await apiClient.get<string[]>('/meta/tables');
+    const res = await apiClient.get<string[]>('/meta/tables', { withCredentials: true });
     console.log("API: Tables fetched successfully.");
     return res.data;
   } catch (err) {
@@ -71,7 +148,7 @@ export const fetchSchema = async (tableName: string): Promise<ApiColumnSchema[]>
   if (!tableName) return Promise.resolve([]); // Return empty if no table name
   try {
     console.log(`API: Fetching schema for table "${tableName}"...`);
-    const res = await apiClient.get<ApiColumnSchema[]>(`/meta/tables/${tableName}/schema`);
+    const res = await apiClient.get<ApiColumnSchema[]>(`/meta/tables/${tableName}/schema`, { withCredentials: true });
     console.log(`API: Schema for "${tableName}" fetched successfully.`);
     // Basic validation of received schema (optional)
     if (!Array.isArray(res.data)) {
@@ -94,7 +171,7 @@ export const fetchData = async (
   try {
     console.log(`API: Fetching data for table "${tableName}" (Page: ${page}, Size: ${pageSize})...`);
     const res = await apiClient.get<ApiFetchDataResponse>(`/data/tables/${tableName}`, {
-      params: { page, pageSize /*, filters, sorts */ },
+      params: { page, pageSize /*, filters, sorts */ }, withCredentials: true
     });
      console.log(`API: Data for "${tableName}" fetched successfully (Total: ${res.data?.total}).`);
     // Basic validation
@@ -123,7 +200,7 @@ export const createRecord = async (
         return acc;
     }, {} as Record<string, any>);
 
-    const res = await apiClient.post<any>(`/data/tables/${tableName}`, cleanData);
+    const res = await apiClient.post<any>(`/data/tables/${tableName}`, cleanData, { withCredentials: true });
     console.log(`API: Record created in "${tableName}" successfully.`);
     return res.data; // Backend should return the created record with its ID
   } catch (err) {
@@ -152,7 +229,7 @@ export const updateRecord = async (
         return acc;
     }, {} as Record<string, any>);
 
-    const res = await apiClient.put<any>(`/data/tables/${tableName}/${encodedPk}`, cleanData);
+    const res = await apiClient.put<any>(`/data/tables/${tableName}/${encodedPk}`, cleanData, { withCredentials: true });
     console.log(`API: Record updated in "${tableName}" (PK: ${pkValue}) successfully.`);
     return res.data; // Backend might return the updated record or just success
   } catch (err) {
@@ -171,7 +248,7 @@ export const deleteRecord = async (
   try {
     const encodedPk = encodeURIComponent(String(pkValue));
     console.log(`API: Deleting record from table "${tableName}" (PK: ${pkValue})...`);
-    await apiClient.delete(`/data/tables/${tableName}/${encodedPk}`);
+    await apiClient.delete(`/data/tables/${tableName}/${encodedPk}`, { withCredentials: true });
     console.log(`API: Record deleted from "${tableName}" (PK: ${pkValue}) successfully.`);
     // No return value needed for successful delete
   } catch (err) {
@@ -190,7 +267,7 @@ export const createColumn = async (
    }
   try {
     console.log(`API: Creating column "${columnData.name}" in table "${tableName}"...`, columnData);
-    await apiClient.post(`/meta/tables/${tableName}/columns`, columnData);
+    await apiClient.post(`/meta/tables/${tableName}/columns`, columnData, { withCredentials: true });
     console.log(`API: Column "${columnData.name}" created in "${tableName}" successfully.`);
   } catch (err) {
     throw handleApiError(err as AxiosError | Error, `createColumn(${tableName})`);

@@ -45,3 +45,17 @@ export interface ApiColumnSchema {
   // Add other specific request/response types if your API uses them
   // e.g., interface ApiResponseSuccess { success: boolean; data?: any; }
   // e.g., interface ApiResponseError { success: boolean; message: string; }
+
+  export interface LoginCredentials {
+    email: string;
+    password: string;
+  }
+  
+  /**
+   * Credentials required for user signup.
+   */
+  export interface SignupCredentials {
+    username: string;
+    email: string;
+    password: string;
+  }

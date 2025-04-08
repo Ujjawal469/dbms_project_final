@@ -1,6 +1,7 @@
 // src/services/meta.service.ts (or wherever your functions are)
 
 import { prisma } from '../config/db'; // Assuming prisma client is here
+import { Prisma } from '@prisma/client';
 
 // Keep the ColumnSchema interface, or define it here if not imported
 export interface ColumnSchema {
@@ -20,6 +21,132 @@ export interface ColumnSchema {
  * Fetches detailed column schema information for a specific table,
  * including primary key and foreign key status.
  */
+
+
+//---------validating new table name -----------------
+const validateTableName = (tableName: string): string => {
+  // 1. Check for empty or whitespace-only names
+ if (!tableName || tableName.trim().length === 0) {
+     throw new Error('Table name cannot be empty.');
+ }
+ const trimmedTableName = tableName.trim();
+
+ // 2. Check format (letters, numbers, underscores, starting with letter/underscore)
+ if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(trimmedTableName)) {
+     const error = new Error(`Invalid table name format: "${trimmedTableName}". Use letters, numbers, underscores, and start with a letter or underscore.`);
+     (error as any).statusCode = 400;
+     throw error;
+ }
+
+ // 3. Check against reserved keywords (PostgreSQL example, needs expansion for robustness)
+ const reservedKeywords = [
+     'ALL', 'ANALYSE', 'ANALYZE', 'AND', 'ANY', 'ARRAY', 'AS', 'ASC', 'ASYMMETRIC', 'AUTHORIZATION',
+     'BINARY', 'BOTH', 'CASE', 'CAST', 'CHECK', 'COLLATE', 'COLLATION', 'COLUMN', 'CONCURRENTLY',
+     'CONSTRAINT', 'CREATE', 'CROSS', 'CURRENT_CATALOG', 'CURRENT_DATE', 'CURRENT_ROLE', 'CURRENT_SCHEMA',
+     'CURRENT_TIME', 'CURRENT_TIMESTAMP', 'CURRENT_USER', 'DEFAULT', 'DEFERRABLE', 'DESC', 'DISTINCT',
+     'DO', 'ELSE', 'END', 'EXCEPT', 'FALSE', 'FETCH', 'FOR', 'FOREIGN', 'FREEZE', 'FROM', 'FULL', 'GRANT',
+     'GROUP', 'HAVING', 'ILIKE', 'IN', 'INITIALLY', 'INNER', 'INTERSECT', 'INTO', 'IS', 'ISNULL', 'JOIN',
+     'LATERAL', 'LEADING', 'LEFT', 'LIKE', 'LIMIT', 'LOCALTIME', 'LOCALTIMESTAMP', 'NATURAL', 'NOT',
+     'NOTNULL', 'NULL', 'OFFSET', 'ON', 'ONLY', 'OR', 'ORDER', 'OUTER', 'OVERLAPS', 'PLACING', 'PRIMARY',
+     'REFERENCES', 'RETURNING', 'RIGHT', 'SELECT', 'SESSION_USER', 'SIMILAR', 'SOME', 'SYMMETRIC', 'TABLE',
+     'TABLESAMPLE', 'THEN', 'TO', 'TRAILING', 'TRUE', 'UNION', 'UNIQUE', 'USER', 'USING', 'VARIADIC',
+     'VERBOSE', 'WHEN', 'WHERE', 'WINDOW', 'WITH'
+ ];
+ if (reservedKeywords.includes(trimmedTableName.toUpperCase())) {
+     const error = new Error(`Table name "${trimmedTableName}" is a reserved SQL keyword.`);
+      (error as any).statusCode = 400;
+      throw error;
+ }
+
+ // 4. Length limit (PostgreSQL default is 63)
+ if (trimmedTableName.length > 63) {
+      const error = new Error(`Table name "${trimmedTableName}" is too long (max 63 characters).`);
+      (error as any).statusCode = 400;
+      throw error;
+ }
+
+ return trimmedTableName; // Return validated name
+}
+
+//-----------create and adding table to database ------------------
+export const createAndAssociateTable = async (userId: number, rawTableName: string): Promise<void> => {
+    const tableName = validateTableName(rawTableName); // Validate and get clean name first
+    console.log(`Attempting to CREATE table "${tableName}" and associate with User ID ${userId}`);
+
+    // --- Step 1: Create the physical table ---
+    // Use $executeRawUnsafe because CREATE TABLE structure isn't parameterized by Prisma.
+    // Validation above is CRITICAL. Double quotes ensure case sensitivity and handle keywords if needed.
+    const createTableSql = `CREATE TABLE "public"."${tableName}" (serial_num SERIAL PRIMARY KEY);`;
+
+    try {
+        console.log("Executing SQL:", createTableSql);
+        await prisma.$executeRawUnsafe(createTableSql);
+        console.log(`Successfully CREATED physical table "${tableName}".`);
+    } catch (error: any) {
+        console.error(`Error CREATING physical table "${tableName}":`, error);
+        // Check for specific PostgreSQL error code for "relation already exists"
+        if (error.code === '42P07') { // PostgreSQL error code for duplicate_table
+            const existsError = new Error(`Table "${tableName}" already exists in the database.`);
+            (existsError as any).statusCode = 409; // Conflict
+            throw existsError;
+        }
+        // Handle other potential DB errors during creation
+        throw new Error(`Could not create physical table "${tableName}". Database error occurred.`);
+    }
+
+    // --- Step 2: Add the association entry ---
+    // This part is similar to the previous addTableEntry function
+    try {
+        await prisma.users_tables.create({
+            data: {
+                user_id: userId,
+                table_name: tableName,
+            },
+        });
+        console.log(`Successfully added table entry for User ID ${userId}, Table: ${tableName}`);
+    } catch (error: any) {
+        // Handle potential duplicate entry errors for the association table
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+            const conflictError = new Error(`Table "${tableName}" is already associated with this user.`);
+            (conflictError as any).statusCode = 409;
+            console.warn(`Duplicate association entry blocked by DB constraint: User ${userId}, Table ${tableName}`);
+            // Decide if we should rollback the physical table creation here?
+            // For simplicity now, we won't, but in a real app, you might need a transaction.
+            throw conflictError;
+        }
+        // Handle other errors during association
+        console.error(`Error adding association entry for User ${userId}, Table ${tableName}:`, error);
+        // If association fails after table creation, the physical table still exists!
+        // Consider adding cleanup logic or using transactions for atomicity.
+        throw new Error(`Could not add table association for "${tableName}" after creating table.`);
+    }
+};
+
+
+export const getTables = async (userId: number): Promise<string[]> => {
+  // ... (your existing code) ...
+  console.log(`Fetching tables for user ID: ${userId}`);
+  try {
+      // Query the users_tables model (Prisma uses the model name)
+      const userTablesResult = await prisma.users_tables.findMany({
+          where: {
+              user_id: userId, // Filter by the provided user ID
+          },
+          select: {
+              table_name: true, // Select only the table_name column
+          },
+      });
+
+      // Extract the table names into a simple array of strings
+      const tableNames = userTablesResult.map(row => row.table_name);
+      console.log(`Found tables for user ${userId}:`, tableNames);
+      return tableNames;
+  } catch (error) {
+      console.error("Error fetching tables:", error);
+      throw new Error("Could not fetch tables from the database.");
+  }
+};
+
 export const getTableSchema = async (tableName: string): Promise<ColumnSchema[]> => {
   console.log(`Fetching schema for table: ${tableName}`);
 
@@ -87,21 +214,6 @@ export const getTableSchema = async (tableName: string): Promise<ColumnSchema[]>
 };
 
 // --- Keep your existing getTables function ---
-export const getTables = async (): Promise<string[]> => {
-    // ... (your existing code) ...
-    console.log('Fetching tables...');
-    try {
-        const tablesResult: { table_name: string }[] = await prisma.$queryRaw`
-        SELECT table_name FROM information_schema.tables
-        WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
-        ORDER BY table_name;
-        `;
-        return tablesResult.map(row => row.table_name);
-    } catch (error) {
-        console.error("Error fetching tables:", error);
-        throw new Error("Could not fetch tables from the database.");
-    }
-};
 
 
 // --- NEW FUNCTION to Add Column ---

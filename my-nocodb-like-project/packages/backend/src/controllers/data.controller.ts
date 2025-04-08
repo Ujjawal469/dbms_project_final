@@ -3,6 +3,11 @@ import * as dataService from '../services/data.service';
 
 export const getTableData = async (req: Request, res: Response) => {
     try {
+        const userId = req.session?.userId; // Get userId for validation
+
+        if (!userId) {
+             return res.status(401).json({ message: 'Unauthorized. Please log in.' });
+        }
         const { tableName } = req.params;
 
         // Basic pagination (improve validation)
@@ -25,6 +30,11 @@ export const getTableData = async (req: Request, res: Response) => {
 
 export const addRow = async (req: Request, res: Response) => {
     try {
+        const userId = req.session?.userId; // Get userId for validation
+
+        if (!userId) {
+             return res.status(401).json({ message: 'Unauthorized. Please log in.' });
+        }
         const { tableName } = req.params;
         const rowData = req.body;
 
@@ -42,6 +52,11 @@ export const addRow = async (req: Request, res: Response) => {
 
 export const updateExistingRow = async (req: Request, res: Response) => {
     try {
+        const userId = req.session?.userId; // Get userId for validation
+
+        if (!userId) {
+             return res.status(401).json({ message: 'Unauthorized. Please log in.' });
+        }
         const { tableName, pkValue } = req.params;
         const rowData = req.body;
 
@@ -64,6 +79,11 @@ export const updateExistingRow = async (req: Request, res: Response) => {
 
 export const deleteExistingRow = async (req: Request, res: Response) => {
     try {
+        const userId = req.session?.userId; // Get userId for validation
+
+        if (!userId) {
+             return res.status(401).json({ message: 'Unauthorized. Please log in.' });
+        }
         const { tableName, pkValue } = req.params;
 
         if (!tableName || !pkValue) {
