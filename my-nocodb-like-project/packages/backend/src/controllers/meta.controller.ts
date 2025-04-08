@@ -143,4 +143,40 @@ export const addColumnToTable = async (req: Request, res: Response) => {
     }
 };
 
+//-------------delete table -------------------
+
+export const deleteTable = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const userId = req.session?.userId;
+        const { tableName } = req.params; // Get table name from URL parameter
+
+        // 1. Check Authentication
+        if (!userId) {
+            console.warn('Attempt to delete table without authentication.');
+            return res.status(401).json({ message: 'Unauthorized. Please log in.' });
+        }
+
+        // 2. Basic Input Validation (Service layer does stricter validation)
+        if (!tableName || typeof tableName !== 'string' || tableName.trim().length === 0) {
+            return res.status(400).json({ message: 'Table name parameter is required.' });
+        }
+
+        const trimmedTableName = tableName.trim();
+        console.log(`CONTROLLER: Attempting to DELETE table "${trimmedTableName}" for User ${userId}`);
+
+        // 3. Call the service function to delete the table AND association
+        await metaService.deleteTableAndAssociation(userId, trimmedTableName);
+
+        console.log(`CONTROLLER: Table "${trimmedTableName}" deleted successfully for User ${userId}`);
+
+        // 4. Send Success Response (204 No Content is suitable for DELETE)
+        res.status(204).send(); // No content to send back on successful delete
+
+    } catch (error: any) {
+        console.error(`CONTROLLER ERROR (deleteTable):`, error);
+        // Pass error to the global error handler
+        next(error);
+    }
+};
+
 // --- Add other controller functions here later (e.g., updateColumn, deleteColumn) ---

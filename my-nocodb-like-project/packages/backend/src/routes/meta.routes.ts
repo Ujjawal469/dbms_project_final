@@ -10,6 +10,7 @@ router.get('/tables/:tableName/schema', metaController.getSchemaForTable);
 
 // --- NEW ROUTE for Adding a Column ---
 router.post('/tables/:tableName/columns', metaController.addColumnToTable);
+router.delete('/tables/:tableName', metaController.deleteTable);
 // --- END NEW ROUTE ---
 
 export default router;

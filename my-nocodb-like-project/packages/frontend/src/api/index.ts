@@ -274,5 +274,27 @@ export const createColumn = async (
   }
 };
 
+//----------------delete table --------------------------
+export const deleteTable = async (tableName: string): Promise<void> => {
+  if (!tableName || tableName.trim().length === 0) {
+    throw new Error("Table name cannot be empty.");
+  }
+  try {
+    const trimmedTableName = tableName.trim();
+    const encodedTableName = encodeURIComponent(trimmedTableName); // Ensure safe URL parameter
+    console.log(`API: Deleting table "${trimmedTableName}"...`);
+    // Use DELETE method, include tableName in URL
+    await apiClient.delete(
+        `/meta/tables/${encodedTableName}`, // Pass name in URL
+        { withCredentials: true } // Requires authentication
+    );
+    console.log(`API: Table "${trimmedTableName}" deleted request sent successfully.`);
+    // No response body expected for 204 No Content
+  } catch (err) {
+    // Handle API errors, including 404 Not Found, 403 Forbidden, etc.
+    throw handleApiError(err as AxiosError | Error, `deleteTable(${tableName})`);
+  }
+};
+
 // --- Add other potential API functions as needed ---
 // e.g., fetchForeignKeys(tableName, columnName), deleteColumn, updateColumn, createTable, deleteTable etc.
