@@ -7,59 +7,19 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
-model cart {
-  serial_num Int @id @default(autoincrement())
-  user_id    Int
-  item_id    Int
-  quantity   Int
-}
-
-/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
-model orderaddress {
-  serial_num Int    @id @default(autoincrement())
-  order_id   Int
-  street     String @db.VarChar(255)
-  city       String @db.VarChar(100)
-  state      String @db.VarChar(100)
-  pincode    String @db.Char(6)
-}
-
-model orderitems {
-  serial_num Int     @id @default(autoincrement())
-  order_id   Int
-  product_id Int
-  quantity   Int
-  price      Decimal @db.Decimal(10, 2)
-}
-
-model orders {
-  serial_num   Int       @id @default(autoincrement())
-  order_id     Int
-  user_id      Int
-  order_date   DateTime? @default(now()) @db.Timestamp(6)
-  total_amount Decimal   @db.Decimal(10, 2)
-}
-
-model products {
-  serial_num     Int     @id @default(autoincrement())
-  product_id     Int
-  name           String  @db.VarChar(100)
-  price          Decimal @db.Decimal(10, 2)
-  stock_quantity Int
-}
-
 model users {
-  user_id       Int           @id @default(autoincrement())
-  username      String        @db.VarChar(100)
-  email         String        @unique @db.VarChar(100)
+  user_id       Int            @id @default(autoincrement())
+  username      String         @db.VarChar(100)
+  email         String         @unique @db.VarChar(100)
   password_hash String
-  users_tables  users_tables?
+  users_tables  users_tables[]
 }
 
 /// The underlying table does not contain a valid unique identifier and can therefore currently not be handled by Prisma Client.
 model users_tables {
-  user_id    Int    @id
+  user_id    Int
   table_name String @db.VarChar(200)
   users      users  @relation(fields: [user_id], references: [user_id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@id([user_id, table_name])
 }
