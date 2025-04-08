@@ -10,7 +10,6 @@ router.use('/meta', metaRoutes);
 router.use('/data', dataRoutes);
 router.use('/user', userRoutes);
 
-// Optional: Add a root API endpoint check
 router.get('/', (req, res) => {
   res.json({ message: 'API is running' });
 });

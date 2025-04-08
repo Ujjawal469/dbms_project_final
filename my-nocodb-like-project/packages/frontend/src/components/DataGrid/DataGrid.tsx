@@ -1,31 +1,28 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
-  Table, Spin, Alert, Empty, Pagination, Button, Input, Space, message, Modal, Form, Select, InputNumber, DatePicker, Checkbox // Added Checkbox for potential future use
+  Table, Spin, Alert, Empty, Pagination, Button, Input, Space, message, Modal, Form, Select, InputNumber, DatePicker, Checkbox
 } from 'antd';
 import { ColumnsType } from 'antd/es/table';
-import * as api from '../../api'; // Assuming your API functions are defined here
-import { ApiColumnSchema, NewColumnPayload } from '../../api/types'; // Assuming your types are defined here
+import * as api from '../../api'; 
+import { ApiColumnSchema, NewColumnPayload } from '../../api/types';
 
-// Destructure components from Ant Design for convenience
 const { confirm } = Modal;
 const { Option } = Select;
 
-// Interface for the main component props
 interface DataGridProps {
   tableName: string | null;
 }
 
-// Helper types for state management
 type EditingRowData = Record<string, any> | null;
 
 // List of supported column types for the "Add Column" dropdown
 // Customize this list based on your actual backend database support
 const SUPPORTED_COLUMN_TYPES = [
-    'TEXT', 'VARCHAR', // Common text types
-    'INTEGER', 'INT', 'BIGINT', // Common integer types
-    'NUMERIC', 'DECIMAL', 'FLOAT', 'REAL', 'DOUBLE PRECISION', // Common numeric/decimal types
+    'TEXT', 'VARCHAR',
+    'INTEGER', 'INT', 'BIGINT', 
+    'NUMERIC', 'DECIMAL', 'FLOAT', 'REAL', 'DOUBLE PRECISION',
     'BOOLEAN', 'BOOL',
-    'DATE', 'TIMESTAMP', 'TIMESTAMP WITH TIME ZONE' // Common date/time types
+    'DATE', 'TIMESTAMP', 'TIMESTAMP WITH TIME ZONE'
     // Add others as needed (e.g., JSON, JSONB, UUID)
 ];
 

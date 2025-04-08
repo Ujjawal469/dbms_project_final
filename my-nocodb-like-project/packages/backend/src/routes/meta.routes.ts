@@ -3,14 +3,10 @@ import * as metaController from '../controllers/meta.controller'; // Assuming co
 
 const router = express.Router();
 
-// Existing routes
 router.get('/tables', metaController.listTables);
 router.post('/tables', metaController.addTable);
 router.get('/tables/:tableName/schema', metaController.getSchemaForTable);
-
-// --- NEW ROUTE for Adding a Column ---
 router.post('/tables/:tableName/columns', metaController.addColumnToTable);
 router.delete('/tables/:tableName', metaController.deleteTable);
-// --- END NEW ROUTE ---
 
 export default router;

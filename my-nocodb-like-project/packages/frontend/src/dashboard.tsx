@@ -14,7 +14,7 @@ const App: React.FC = () => {
   return (
     <Layout className="app-layout">
       <Header className="app-header">
-        <Title level={3} style={{ color: 'white', margin: 0 }}>My NocoDB Clone</Title>
+        <Title level={3} style={{ color: 'white', margin: 0 }}>Spreadsheet UI</Title>
       </Header>
       <Layout>
         <Sider

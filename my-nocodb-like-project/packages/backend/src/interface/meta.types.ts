@@ -1,0 +1,9 @@
+export interface ColumnSchema {
+    name: string;
+    type: string;
+    isPrimaryKey: boolean;
+    isNullable: boolean;
+    isForeignKey: boolean;
+    defaultValue?: string | null;
+    isUnique?: boolean;
+  }

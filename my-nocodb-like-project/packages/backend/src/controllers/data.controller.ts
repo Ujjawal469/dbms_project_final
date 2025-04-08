@@ -4,17 +4,15 @@ import { convertBigIntsToStrings } from '../utils/jsonUtils';
 
 export const getTableData = async (req: Request, res: Response) => {
     try {
-        const userId = req.session?.userId; // Get userId for validation
+        const userId = req.session?.userId;
 
         if (!userId) {
              return res.status(401).json({ message: 'Unauthorized. Please log in.' });
         }
         const { tableName } = req.params;
-
-        // Basic pagination (improve validation)
         const page = parseInt(req.query.page as string || '1', 10) || 1;
         const pageSize = parseInt(req.query.pageSize as string || '20', 10) || 20;
-        const limit = Math.min(Math.max(1, pageSize), 100); // Clamp page size
+        const limit = Math.min(Math.max(1, pageSize), 100);
         const offset = (page - 1) * limit;
 
         if (!tableName) {
@@ -32,7 +30,7 @@ export const getTableData = async (req: Request, res: Response) => {
 
 export const addRow = async (req: Request, res: Response) => {
     try {
-        const userId = req.session?.userId; // Get userId for validation
+        const userId = req.session?.userId;
 
         if (!userId) {
              return res.status(401).json({ message: 'Unauthorized. Please log in.' });
@@ -55,7 +53,7 @@ export const addRow = async (req: Request, res: Response) => {
 
 export const updateExistingRow = async (req: Request, res: Response) => {
     try {
-        const userId = req.session?.userId; // Get userId for validation
+        const userId = req.session?.userId;
 
         if (!userId) {
              return res.status(401).json({ message: 'Unauthorized. Please log in.' });
@@ -83,7 +81,7 @@ export const updateExistingRow = async (req: Request, res: Response) => {
 
 export const deleteExistingRow = async (req: Request, res: Response) => {
     try {
-        const userId = req.session?.userId; // Get userId for validation
+        const userId = req.session?.userId;
 
         if (!userId) {
              return res.status(401).json({ message: 'Unauthorized. Please log in.' });
@@ -102,7 +100,7 @@ export const deleteExistingRow = async (req: Request, res: Response) => {
         const result = await dataService.deleteRow(tableName, pkValue, pkColumn);
 
         if (result.deleted) {
-            res.status(204).send(); // No Content
+            res.status(204).send();
         } else {
             res.status(404).json({ message: 'Row not found for deletion.' });
         }
