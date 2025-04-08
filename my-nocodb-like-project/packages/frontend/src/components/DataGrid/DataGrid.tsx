@@ -21,11 +21,11 @@ type EditingRowData = Record<string, any> | null;
 // List of supported column types for the "Add Column" dropdown
 // Customize this list based on your actual backend database support
 const SUPPORTED_COLUMN_TYPES = [
-    'TEXT', 'VARCHAR', 'STRING', // Common text types
-    'INTEGER', 'INT', 'BIGINT', 'SERIAL', 'BIGSERIAL', // Common integer types
+    'TEXT', 'VARCHAR', // Common text types
+    'INTEGER', 'INT', 'BIGINT', // Common integer types
     'NUMERIC', 'DECIMAL', 'FLOAT', 'REAL', 'DOUBLE PRECISION', // Common numeric/decimal types
     'BOOLEAN', 'BOOL',
-    'DATE', 'TIMESTAMP', 'TIMESTAMP WITH TIME ZONE', 'DATETIME' // Common date/time types
+    'DATE', 'TIMESTAMP', 'TIMESTAMP WITH TIME ZONE' // Common date/time types
     // Add others as needed (e.g., JSON, JSONB, UUID)
 ];
 
