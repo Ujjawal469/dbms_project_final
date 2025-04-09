@@ -1,10 +1,6 @@
-// signup.tsx
 
 import React, { useState, useEffect } from "react";
-// --- Corrected and Combined Imports ---
 import { useNavigate, Link } from "react-router-dom";
-// --- Import API functions ---
-// Adjust path if signup.tsx is not in the same directory as login.tsx relative to the api folder
 import * as api from './api';
 
 const Signup = () => {
@@ -14,36 +10,27 @@ const Signup = () => {
     email: "",
     password: "",
   });
-  // --- Use null for no error, matching login.tsx ---
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  // --- Added isLoading state ---
   const [isLoading, setIsLoading] = useState<boolean>(false);
 
-  // Check login status on component mount
   useEffect(() => {
     const checkStatus = async () => {
       try {
-        // --- Use API function ---
         const isLoggedIn = await api.checkLoginStatus();
-        if (isLoggedIn) {
+        if (isLoggedIn.loggedIn) {
           console.log("User already logged in, redirecting to Dashboard.");
           navigate("/Dashboard");
         } else {
           console.log("User not logged in.");
-          // Stay on signup page
         }
       } catch (error) {
-        // Error is already logged by handleApiError in index.ts
         console.error("Error checking login status on signup page:", error);
-        // Optionally set a generic error for the user if status check fails unexpectedly
-        // setErrorMessage("Could not verify login status.");
       }
     };
     checkStatus();
   }, [navigate]);
 
-  // Handle input field changes
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => { // <-- Added type
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => { 
     const { name, value } = e.target;
     setFormData((prevData) => ({
       ...prevData,
@@ -51,22 +38,16 @@ const Signup = () => {
     }));
   };
 
-  // Handle form submission for signup
-  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => { // <-- Added type
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => { 
     e.preventDefault();
-    setErrorMessage(null); // Clear previous errors
-    setIsLoading(true);    // Set loading state
+    setErrorMessage(null);
+    setIsLoading(true);    
 
     try {
-      // --- Use API function ---
       await api.signupUser(formData);
-      // If signupUser resolves, signup was successful
       console.log("Signup successful, navigating to Dashboard.");
       navigate("/Login");
     } catch (error) {
-      // signupUser rejected, meaning signup failed or another error occurred
-      // handleApiError in index.ts already logged details
-      // Display the message from the error thrown by the API function
       if (error instanceof Error) {
         setErrorMessage(error.message || "Signup failed. Please check your input.");
       } else {
@@ -74,29 +55,27 @@ const Signup = () => {
       }
       console.error("Signup failed:", error);
     } finally {
-      setIsLoading(false); // Reset loading state regardless of outcome
+      setIsLoading(false);
     }
   };
 
-  // --- Styles (minor adjustments for consistency if needed, kept original for now) ---
    const buttonStyle: React.CSSProperties = {
     backgroundColor: "#555",
     color: "#fff",
     padding: "10px 15px",
     borderRadius: "4px",
     border: "none",
-    cursor: isLoading ? 'not-allowed' : 'pointer', // Change cursor when loading
+    cursor: isLoading ? 'not-allowed' : 'pointer',
     fontSize: "16px",
     marginTop: "10px",
-    transition: "background-color 0.2s ease-in-out, opacity 0.2s ease-in-out", // Added opacity transition
-    opacity: isLoading ? 0.7 : 1, // Dim button when loading
+    transition: "background-color 0.2s ease-in-out, opacity 0.2s ease-in-out",
+    opacity: isLoading ? 0.7 : 1, 
   };
 
   const buttonHoverStyle: React.CSSProperties = {
     backgroundColor: "#333",
   };
 
-  // --- JSX Structure ---
   return (
     <div
       style={{
@@ -195,7 +174,6 @@ const Signup = () => {
           type="submit"
           style={buttonStyle}
           onMouseOver={(e) => {
-            // --- Prevent hover effect when loading ---
             if (!isLoading) {
               (e.target as HTMLButtonElement).style.backgroundColor = buttonHoverStyle.backgroundColor;
             }

@@ -1,15 +1,63 @@
-import React, { useState } from 'react';
-import { Layout, Typography } from 'antd';
+import React, { useState, useEffect } from 'react';
+import { useNavigate } from "react-router-dom";
+import { Layout, Typography, Spin } from 'antd';
 import Sidebar from './components/Sidebar/Sidebar';
 import DataGrid from './components/DataGrid/DataGrid';
-import './dashboard.css'; // Import App specific styles
+import * as api from './api';
+import './dashboard.css';
 
 const { Header, Content, Sider } = Layout;
 const { Title } = Typography;
 
-const App: React.FC = () => {
+const Dashboard: React.FC = () => {
+  const navigate = useNavigate();
   const [selectedTable, setSelectedTable] = useState<string | null>(null);
-  const [collapsed, setCollapsed] = useState(false); // Sidebar collapse state
+  const [collapsed, setCollapsed] = useState(false);
+  const [isCheckingAuth, setIsCheckingAuth] = useState<boolean>(true);
+  const [authError, setAuthError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const checkAuthStatus = async () => {
+      setAuthError(null);
+      try {
+        const isLoggedIn = await api.checkLoginStatus();
+        if (!isLoggedIn.loggedIn) {
+          console.log("User not logged in, redirecting to Login.");
+          navigate("/login"); 
+        } else {
+          console.log("User is logged in. Rendering Dashboard.");
+         
+          setIsCheckingAuth(false);
+        }
+      } catch (error) {
+        console.error("Error checking authentication status:", error);
+        setAuthError("Could not verify authentication status. Please try logging in again.");
+        navigate("/login");
+      }
+      
+    };
+
+    checkAuthStatus();
+  }, [navigate]); 
+
+
+  if (isCheckingAuth) {
+    return (
+      <Layout style={{ minHeight: '100vh', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+        <Spin size="large" tip="Verifying authentication..." />
+      </Layout>
+    );
+  }
+
+
+  if (authError) {
+     return (
+      <Layout style={{ minHeight: '100vh', display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px' }}>
+         <Typography.Text type="danger">{authError}</Typography.Text>
+         {/* Optionally add a button to retry or go to login */}
+      </Layout>
+    );
+  }
 
   return (
     <Layout className="app-layout">
@@ -43,4 +91,4 @@ const App: React.FC = () => {
   );
 };
 
-export default App;
+export default Dashboard;

@@ -159,10 +159,9 @@ export const deleteTable = async (req: Request, res: Response, next: NextFunctio
 export const renameTable = async (req: Request, res: Response, next: NextFunction) => {
     try {
         const userId = req.session?.userId;
-        const { oldTableName } = req.params;   // Get old name from URL parameter
-        const { newTableName } = req.body;     // Get new name from request body
+        const { oldTableName } = req.params;
+        const { newTableName } = req.body;    
 
-        // 1. Check Authentication
         if (!userId) {
             console.warn('Attempt to rename table without authentication.');
             return res.status(401).json({ message: 'Unauthorized. Please log in.' });
@@ -182,12 +181,9 @@ export const renameTable = async (req: Request, res: Response, next: NextFunctio
         const finalnewTableName = trimmedNewName + "_" + userId;
         console.log(`CONTROLLER: Attempting to RENAME table "${finalOldTableName}" to "${finalnewTableName}" for User ${userId}`);
 
-        // 3. Call the service function to rename the table AND association
         await metaService.renameTableAndAssociation(userId, finalOldTableName, finalnewTableName);
 
         console.log(`CONTROLLER: Table "${finalOldTableName}" renamed to "${finalnewTableName}" successfully for User ${userId}`);
-
-        // 4. Send Success Response (200 OK with new name, or 204 No Content)
         res.status(200).json({
             message: `Table "${trimmedOldName}" renamed to "${trimmedNewName}" successfully.`,
             oldTableName: trimmedOldName,
@@ -196,7 +192,6 @@ export const renameTable = async (req: Request, res: Response, next: NextFunctio
 
     } catch (error: any) {
         console.error(`CONTROLLER ERROR (renameTable):`, error);
-        // Pass error to the global error handler
         next(error);
     }
 };

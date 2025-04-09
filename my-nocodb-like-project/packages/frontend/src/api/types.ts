@@ -23,10 +23,6 @@ export interface ApiColumnSchema {
     total: number; // Total number of rows matching the query (for pagination)
   }
   
-  /**
-   * Defines the structure of the payload when creating
-   * a new column via the API.
-   */
   export interface NewColumnPayload {
     name: string;        // New column's name
     type: string;        // New column's data type (matching backend/DB supported types)
@@ -35,21 +31,22 @@ export interface ApiColumnSchema {
     isUnique?: boolean;   // Optional: Add unique constraint?
     // Add other constraints/properties as needed (e.g., character limit for VARCHAR)
   }
-  
-  // Add other specific request/response types if your API uses them
-  // e.g., interface ApiResponseSuccess { success: boolean; data?: any; }
-  // e.g., interface ApiResponseError { success: boolean; message: string; }
+
 
   export interface LoginCredentials {
     email: string;
     password: string;
   }
   
-  /**
-   * Credentials required for user signup.
-   */
+
   export interface SignupCredentials {
     username: string;
     email: string;
     password: string;
+  }
+
+  export interface LoggedInUser {
+    user_id: BigInt;
+    username: string; 
+    email: string;
   }

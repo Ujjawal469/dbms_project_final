@@ -1,23 +1,24 @@
-// src/components/Sidebar/Sidebar.tsx
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { Menu, Spin, Alert, Empty, Button, Modal, Form, Input, message, Dropdown, Space } from 'antd';
 import { PlusOutlined, EllipsisOutlined, AppstoreOutlined, TableOutlined, DeleteOutlined, EditOutlined } from '@ant-design/icons';
-import * as api from '../../api'; // Assuming API functions are in src/api/index.ts
-
+import * as api from '../../api';
+import { UserOutlined,LogoutOutlined } from '@ant-design/icons';
+import { useNavigate } from 'react-router-dom';
+import { LoggedInUser } from '../../api/types';
 const { confirm } = Modal;
 
 /**
  * Props for the Sidebar component.
  */
 interface SidebarProps {
-    /** The name of the currently selected table, or null if none is selected */
+
     selectedTable: string | null;
-    /** Callback function triggered when a table is selected or deselected */
+   
     onSelectTable: (tableName: string | null) => void;
-    /** Optional callback function triggered when a view creation is initiated */
+   
     onCreateView?: (tableName: string, viewType: 'grid' | 'gallery') => void;
-    /** Optional callback function to notify parent when table list changes (e.g., after add/delete/rename) */
+   
     onTableListChange?: () => void;
 }
 
@@ -26,33 +27,63 @@ interface SidebarProps {
  * and provides actions per table (e.g., Create View).
  */
 const Sidebar: React.FC<SidebarProps> = ({ selectedTable, onSelectTable, onCreateView, onTableListChange }) => {
-  // Core state for table list, loading, and errors
+
   const [tables, setTables] = useState<string[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
-  // State for "Add Table" modal
   const [isAddModalVisible, setIsAddModalVisible] = useState<boolean>(false);
   const [confirmLoadingAdd, setConfirmLoadingAdd] = useState<boolean>(false);
   const [addTableForm] = Form.useForm();
 
-  // State for "Rename Table" modal
   const [isRenameModalVisible, setIsRenameModalVisible] = useState<boolean>(false);
   const [confirmLoadingRename, setConfirmLoadingRename] = useState<boolean>(false);
   const [renameTableForm] = Form.useForm();
-  // State to hold the old name of the table being renamed while the modal is open
   const [renamingTableInfo, setRenamingTableInfo] = useState<{ oldName: string } | null>(null);
 
-  // State for "Delete Table" operation (tracks which item is being deleted)
   const [deletingTableKey, setDeletingTableKey] = useState<string | null>(null);
+  const [currentUser, setCurrentUser] = useState<LoggedInUser | null>(null);
+  const [loadingUser, setLoadingUser] = useState<boolean>(true);
 
+  const stringToColor = (str: string): string => {
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+      hash = str.charCodeAt(i) + ((hash << 5) - hash);
+      hash = hash & hash; // Convert to 32bit integer
+    }
+    const colors = [
+      '#F56A00', '#7265E6', '#FFBF00', '#00A2AE', '#1890ff', '#f5222d',
+      '#52c41a', '#faad14', '#eb2f96', '#2f54eb', '#fa8c16', '#a0d911'
+    ]; // Example palette
+    const index = Math.abs(hash) % colors.length;
+    return colors[index];
+  };
+  
+  const getInitials = (name: string): string => {
+    if (!name) return '?';
+    const trimmedName = name.trim();
+    if (trimmedName.length === 0) return '?';
+    const parts = trimmedName.split(' ');
+    if (parts.length >= 2) {
+      return (parts[0][0] + parts[1][0]).toUpperCase();
+    }
+    if (trimmedName.length >= 2) {
+      return trimmedName.substring(0, 2).toUpperCase();
+    }
+    return trimmedName.substring(0, 1).toUpperCase();
+  };
 
-  /**
-   * Fetches the list of user's tables from the API.
-   * Wrapped in useCallback for memoization.
-   */
+  useEffect(() => {
+    let isMounted = true;
+    setLoadingUser(true);
+    api.checkLoginStatus()
+      .then(status => { if (isMounted) { setCurrentUser(status.user); setLoadingUser(false); } })
+      .catch(err => { if (isMounted) { console.error("Login check failed", err); setError("Failed login check"); setCurrentUser(null); setLoadingUser(false); } });
+    return () => { isMounted = false; };
+  }, []);
+
   const fetchUserTables = useCallback(async (): Promise<void> => {
-    setDeletingTableKey(null); // Reset any delete indicators
+    setDeletingTableKey(null); 
     setLoading(true);
     setError(null);
     console.log("Sidebar: Fetching tables...");
@@ -61,50 +92,47 @@ const Sidebar: React.FC<SidebarProps> = ({ selectedTable, onSelectTable, onCreat
         if (!Array.isArray(data)) {
             throw new Error("Invalid table list format received.");
         }
-        setTables(data.sort()); // Update state with sorted list
+        setTables(data.sort()); 
         setError(null);
-        // Notify parent component about the potential change in the table list
+  
         if (onTableListChange) onTableListChange();
     } catch (err: any) {
         console.error("Sidebar: Fetch tables error:", err);
         const errorMsg = err.message || 'Unknown error';
         setError(`Failed to load tables: ${errorMsg}`);
         setTables([]); // Clear list on error
-        // Optionally re-throw if needed by caller context
-        // throw err;
+
     } finally {
-        setLoading(false); // Ensure loading state is always turned off
+        setLoading(false); 
     }
- }, [onTableListChange]); // Recreate only if onTableListChange prop changes
+ }, [onTableListChange]); 
 
 
  /**
   * useEffect hook to perform the initial table fetch when the component mounts.
   */
  useEffect(() => {
+    
     console.log("Sidebar: Mount/fetchUserTables dependency changed. Fetching...");
     fetchUserTables().catch(() => {
-        // Catch errors from initial fetch so the component doesn't crash
         console.error("Initial table fetch failed and was caught by useEffect.");
-        // Error state is already managed within fetchUserTables
     });
- }, [fetchUserTables]); // Dependency array includes the memoized fetch function
+ }, [fetchUserTables]);
 
 
-  // --- Add Table Modal Handlers ---
-  /** Opens the Add Table modal */
+
   const showAddTableModal = () => {
     addTableForm.resetFields();
     setIsAddModalVisible(true);
   };
 
-  /** Handles Add Table modal form submission */
+
   const handleAddTableOk = async () => {
     try {
       const values = await addTableForm.validateFields();
       const newTableName = values.tableName.trim();
       if (!newTableName) { message.error("Table name cannot be empty."); return; }
-      // Client-side check for duplicate name before API call
+
       if (tables.includes(newTableName)) {
          message.error(`Table "${newTableName}" already exists.`);
          return;
@@ -114,7 +142,7 @@ const Sidebar: React.FC<SidebarProps> = ({ selectedTable, onSelectTable, onCreat
       const response = await api.addTable(newTableName); // API call
       message.success(response?.message || `Table "${newTableName}" created successfully!`);
       setIsAddModalVisible(false);
-      await fetchUserTables(); // Await the refresh
+      await fetchUserTables(); 
     } catch (errorInfo: any) {
       console.error('Sidebar: Create Table Failed:', errorInfo);
        const errorMsg = errorInfo.message || 'Please try again.';
@@ -124,31 +152,26 @@ const Sidebar: React.FC<SidebarProps> = ({ selectedTable, onSelectTable, onCreat
       setConfirmLoadingAdd(false);
     }
   };
+  const navigate = useNavigate();
 
-  /** Handles closing the Add Table modal */
   const handleAddTableCancel = () => {
     setIsAddModalVisible(false);
   };
-  // --- End Add Table Modal Handlers ---
-
-  // --- Rename Table Handlers ---
-  /** Opens the Rename Table modal, pre-filling the form */
+ 
   const showRenameTableModal = (oldTableName: string) => {
     setRenamingTableInfo({ oldName: oldTableName });
-    renameTableForm.setFieldsValue({ newTableName: oldTableName }); // Pre-fill with old name
+    renameTableForm.setFieldsValue({ newTableName: oldTableName }); 
     setIsRenameModalVisible(true);
   };
 
-  /** Handles Rename Table modal form submission */
   const handleRenameTableOk = async () => {
-    if (!renamingTableInfo) return; // Should have oldName if modal is open
+    if (!renamingTableInfo) return; 
     const { oldName } = renamingTableInfo;
 
     try {
       const values = await renameTableForm.validateFields();
       const newTableName = values.newTableName.trim();
 
-      // Validation (handled mostly by form rules now)
       if (newTableName === oldName) {
           message.info("No changes made.");
           setIsRenameModalVisible(false);
@@ -167,10 +190,8 @@ const Sidebar: React.FC<SidebarProps> = ({ selectedTable, onSelectTable, onCreat
       setIsRenameModalVisible(false);
       setRenamingTableInfo(null);
 
-      // Refresh the table list AFTER successful rename
       await fetchUserTables();
 
-      // If the renamed table was the currently selected one, update selection to new name
       if (selectedTable === oldName) {
         onSelectTable(newTableName);
       }
@@ -180,23 +201,17 @@ const Sidebar: React.FC<SidebarProps> = ({ selectedTable, onSelectTable, onCreat
       const errorMsg = errorInfo.message || 'Please try again.';
       if (errorInfo.errorFields) { message.error('Validation failed...'); }
       else { message.error(`Failed to rename table: ${errorMsg}`); }
-      // Keep modal open on error for correction
     } finally {
       setConfirmLoadingRename(false);
-      // Ensure loading message is removed even on error
       message.destroy(`rename-${renamingTableInfo?.oldName}`);
     }
   };
 
-  /** Handles closing the Rename Table modal */
   const handleRenameTableCancel = () => {
     setIsRenameModalVisible(false);
-    setRenamingTableInfo(null); // Clear the state tracking the table being renamed
+    setRenamingTableInfo(null);
   };
-  // --- End Rename Table Handlers ---
 
-  // --- Delete Table Handler ---
-  /** Handles the deletion of a table after confirmation */
   const handleDeleteTable = (tableNameToDelete: string) => {
     confirm({
         title: `Delete Table "${tableNameToDelete}"?`,
@@ -204,7 +219,6 @@ const Sidebar: React.FC<SidebarProps> = ({ selectedTable, onSelectTable, onCreat
         content: 'This will permanently delete the table and all its data. This action cannot be undone.',
         okText: 'Yes, Delete Permanently', okType: 'danger', cancelText: 'Cancel', maskClosable: false,
         onOk: async () => {
-            // Use general loading state for delete as it affects the whole list
             setLoading(true);
             setError(null);
             const messageKey = `delete-${tableNameToDelete}`;
@@ -213,9 +227,7 @@ const Sidebar: React.FC<SidebarProps> = ({ selectedTable, onSelectTable, onCreat
                 console.log(`Sidebar: Attempting to delete table: ${tableNameToDelete}`);
                 await api.deleteTable(tableNameToDelete); // API Call
                 message.success({ content: `Table "${tableNameToDelete}" deleted.`, key: messageKey, duration: 3 });
-                // If deleted table was selected, deselect it
                 if (selectedTable === tableNameToDelete) onSelectTable(null);
-                // Await the refresh to ensure list is updated before loading stops
                 await fetchUserTables();
             } catch (err: any) {
                  console.error(`Sidebar: Error during delete/refetch for ${tableNameToDelete}:`, err);
@@ -224,25 +236,20 @@ const Sidebar: React.FC<SidebarProps> = ({ selectedTable, onSelectTable, onCreat
                  message.error({ content: `Operation failed: ${errorMsg}`, key: messageKey, duration: 5 });
                  setLoading(false); // Manually stop loading on error
             }
-            // setLoading(false) is handled by fetchUserTables on success
         },
         onCancel() { console.log('Delete table cancelled'); },
     });
   };
-  // --- End Delete Table Handler ---
 
-  // --- Create View Handler (Placeholder) ---
   const handleCreateView = (targetTable: string, viewType: 'grid' | 'gallery') => {
       console.log(`Sidebar: Create ${viewType} view for table: ${targetTable}`);
       message.info(`Initiated create ${viewType} view for "${targetTable}".`);
       if (onCreateView) onCreateView(targetTable, viewType);
-      onSelectTable(targetTable); // Select table when creating view
+      onSelectTable(targetTable);
   };
 
-  // --- Select Table Handler ---
-  /** Handles click on the main area of a table item */
   const handleSelectTable = (tableName: string) => {
-    onSelectTable(tableName); // Call parent callback
+    onSelectTable(tableName);
   };
 
 
@@ -250,11 +257,9 @@ const Sidebar: React.FC<SidebarProps> = ({ selectedTable, onSelectTable, onCreat
    * Renders the main content of the sidebar (loading/error/empty/table list).
    */
   const renderSidebarContent = () => {
-    // Handle Loading State
     if (loading && tables.length === 0) {
       return <div style={{ padding: '20px', textAlign: 'center' }}><Spin tip="Loading tables..." /></div>;
     }
-    // Handle Error State
     if (error) {
        return <div style={{ padding: '10px' }}>
                 <Alert
@@ -265,7 +270,6 @@ const Sidebar: React.FC<SidebarProps> = ({ selectedTable, onSelectTable, onCreat
                 />
              </div>;
     }
-    // Handle Empty State
     if (!loading && tables.length === 0) {
        return <div style={{ padding: '20px', textAlign: 'center' }}>
                 <Empty description="No tables found" />
@@ -273,7 +277,6 @@ const Sidebar: React.FC<SidebarProps> = ({ selectedTable, onSelectTable, onCreat
              </div>;
     }
 
-    // --- Define Dropdown Menu Content ---
     const createTableActionMenu = (tableName: string) => (
         <Menu onClick={({ domEvent }) => { domEvent.stopPropagation(); /* Stop menu click from propagating */ }}>
             {/* Create View Submenu */}
@@ -290,13 +293,11 @@ const Sidebar: React.FC<SidebarProps> = ({ selectedTable, onSelectTable, onCreat
         </Menu>
     );
 
-    // --- Render Menu List with Dropdowns ---
     return (
        <Menu
          theme="light"
          mode="inline"
          selectedKeys={selectedTable ? [selectedTable] : []}
-         // Selection handled by div onClick inside Menu.Item
          style={{ height: '100%', borderRight: 0, overflowY: 'auto', padding: '5px 0' }}
        >
          {tables.map(table => (
@@ -336,14 +337,40 @@ const Sidebar: React.FC<SidebarProps> = ({ selectedTable, onSelectTable, onCreat
   }; // --- End renderSidebarContent ---
 
 
-  // --- Component JSX Structure ---
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', borderRight: '1px solid #f0f0f0' }}>
-        {/* Header */}
-        <div style={{ padding: '10px 16px', borderBottom: '1px solid #f0f0f0', flexShrink: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <strong>Tables</strong>
-            {/* Show subtle loading spinner in header when any async op is running */}
-            {loading && <Spin size="small" />}
+
+        {/* -------- User Header (MODIFIED) -------- */}
+        <div style={{ padding: '12px 16px', borderBottom: '1px solid #f0f0f0', flexShrink: 0, display: 'flex', alignItems: 'center', gap: '10px' }}>
+            {/* Conditional Avatar/Icon */}
+            {loadingUser ? (
+                 <Spin size="small" /> // Show spinner while loading user
+            ) : currentUser ? (
+                 <span
+                    aria-label={`Avatar for ${currentUser.username}`}
+                    style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        width: '28px', // Adjust size as needed
+                        height: '28px',
+                        borderRadius: '6px', // Slightly rounded corners
+                        backgroundColor: stringToColor(currentUser.username || 'default'), // Generate color
+                        color: '#fff', // White text
+                        fontSize: '12px', // Adjust font size
+                        fontWeight: '600', // Semi-bold
+                        flexShrink: 0, // Prevent shrinking
+                    }}>
+                     {getInitials(currentUser.username || '?')} {/* Get initials */}
+                 </span>
+            ) : (
+                 <UserOutlined style={{ fontSize: '16px', color: '#bfbfbf' }} /> // Fallback icon
+            )}
+
+            {/* Greeting Text */}
+            <span style={{ fontWeight: 'bold', fontSize: '14px', color: '#333', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {loadingUser ? 'Loading...' : (currentUser ? `Hi, ${currentUser.username}` : 'Not logged in')}
+            </span>
         </div>
 
         {/* Main Content Area */}
@@ -351,10 +378,66 @@ const Sidebar: React.FC<SidebarProps> = ({ selectedTable, onSelectTable, onCreat
             {renderSidebarContent()}
         </div>
 
-        {/* Footer Button */}
-        <div style={{ padding: '8px', borderTop: '1px solid #f0f0f0', flexShrink: 0 }}>
-            <Button type="primary" icon={<PlusOutlined />} block onClick={showAddTableModal} disabled={loading} > Add Table </Button>
+        
+        {/* Footer Buttons */}
+        <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+        
+        {/* All your top content including Add Table goes here */}
+        <div style={{ padding: '8px', borderTop: '1px solid #f0f0f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            block
+            onClick={showAddTableModal}
+            disabled={loading}
+            style={{ flexGrow: 1 }}
+          >
+            Add Table
+          </Button>
         </div>
+
+        {/* Spacer to push profile to bottom */}
+        <div style={{ flexGrow: 1 }} />
+
+        {/* Profile button at the bottom */}
+        <div style={{ padding: '8px', borderTop: '1px solid #f0f0f0' }}>
+          <Dropdown
+            overlay={
+              <Menu>
+                <Menu.Item
+                  key="logout"
+                  danger
+                  icon={<LogoutOutlined />}
+                  onClick={async () => {
+                    try {
+                      await api.logoutUser(); // imported from your index.ts
+                      message.success('Logged out');
+                      window.location.href = '/login';
+                    } catch (error) {
+                      message.error('Failed to logout');
+                    }
+                  }}
+                >
+                  Logout
+                </Menu.Item>
+              </Menu>
+            }
+            trigger={['click']}
+            placement="topCenter"
+          >
+            <Button
+              type="text"
+              icon={<UserOutlined />}
+              block
+              style={{ textAlign: 'left' }}
+            >
+              Profile
+            </Button>
+          </Dropdown>
+        </div>
+        </div>
+
+
 
         {/* --- Modals --- */}
 
@@ -393,7 +476,6 @@ const Sidebar: React.FC<SidebarProps> = ({ selectedTable, onSelectTable, onCreat
                     form={renameTableForm}
                     layout="vertical"
                     name="rename_table_form"
-                    // Set initial value when modal opens
                     initialValues={{ newTableName: renamingTableInfo.oldName }}
                 >
                     <Form.Item
@@ -404,7 +486,6 @@ const Sidebar: React.FC<SidebarProps> = ({ selectedTable, onSelectTable, onCreat
                             { whitespace: true, message: 'Cannot be empty' },
                             { pattern: /^[a-zA-Z_][a-zA-Z0-9_]*$/, message: 'Invalid format' },
                             { max: 63, message: 'Too long (max 63)' },
-                            // Custom validator to check against old name and other existing names
                              ({ getFieldValue }) => ({
                                 validator(_, value) {
                                   const trimmedValue = value?.trim();
@@ -412,7 +493,6 @@ const Sidebar: React.FC<SidebarProps> = ({ selectedTable, onSelectTable, onCreat
                                   if (trimmedValue === renamingTableInfo.oldName) {
                                      return Promise.reject(new Error('New name must be different.'));
                                   }
-                                  // Check against other existing table names (client-side quick check)
                                   if (tables.filter(t => t !== renamingTableInfo.oldName).includes(trimmedValue)) {
                                        return Promise.reject(new Error('This table name already exists.'));
                                   }

@@ -6,7 +6,8 @@ import {
   ApiFetchDataResponse,
   NewColumnPayload,
   LoginCredentials,
-  SignupCredentials
+  SignupCredentials,
+  LoggedInUser
 } from './types';
 
 // ------------------------------ API Base URL Setup from .env ---------------------------------
@@ -46,17 +47,30 @@ const handleApiError = (error: AxiosError | Error, context: string): Error => {
 };
 
 //------------------------------ checking Login status ----------------------------------
-export const checkLoginStatus = async (): Promise<boolean> => { 
+export const checkLoginStatus = async (): Promise<{ loggedIn: boolean, user: LoggedInUser | null }> => {
   try {
     console.log("API: Checking login status...");
-    let isLoggedIn = await apiClient.get('user/isLoggedIn', { withCredentials: true });
-    console.log("API: User is logged in.");
-    return true;
-  } catch (err) {
-    const processedError = handleApiError(err as AxiosError | Error, 'checkLoginStatus');
-    if (processedError.message === "User not logged in") {
-        return false;
+    const response = await apiClient.get('user/isLoggedIn', { withCredentials: true });
+    if (response?.data?.loggedIn && response?.data?.user) {
+      console.log(`API: User is logged in: ${response.data.user.username}`);
+      return response.data as { loggedIn: true, user: LoggedInUser };
+    } else {
+      console.log("API: Received success status, but response data indicates not logged in.");
+      return { loggedIn: false, user: null };
     }
+
+  } catch (err) {
+    const axiosError = err as AxiosError; 
+    if (axiosError.response && axiosError.response.status === 401) {
+      console.log("API: User not logged in (received 401).");
+      return { loggedIn: false, user: null };
+    }
+    const processedError = handleApiError(axiosError, 'checkLoginStatus');
+    if (processedError.message === "User not logged in") {
+        console.log("API: User not logged in (processed error message).");
+       return { loggedIn: false, user: null };
+    }
+    console.error("API: Unexpected error checking login status:", processedError);
     throw processedError;
   }
 };
@@ -288,9 +302,20 @@ export const renameTable = async (oldTableName: string, newTableName: string): P
         { withCredentials: true } // Requires authentication
     );
     console.log(`API: Table rename request sent successfully for "${trimmedOldName}".`);
-    return response.data; // Return backend confirmation message and names
+    return response.data;
   } catch (err) {
-    // Handle API errors, including 404, 403, 409 Conflict etc.
     throw handleApiError(err as AxiosError | Error, `renameTable(${oldTableName}, ${newTableName})`);
+  }
+};
+
+//---------------------------- logout user -------------------------------------------------
+
+export const logoutUser = async (): Promise<void> => {
+  try {
+    console.log("API: Logging out...");
+    await apiClient.post('/user/logout', {}, { withCredentials: true });
+    console.log("API: Logout successful.");
+  } catch (err) {
+    throw handleApiError(err as AxiosError | Error, 'logoutUser');
   }
 };

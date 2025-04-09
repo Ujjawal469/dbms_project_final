@@ -301,46 +301,37 @@ export const deleteTableAndAssociation = async (userId: number, rawTableName: st
 
 //----------------------------------------------- rename table ----------------------------------------------------
 export const renameTableAndAssociation = async (userId: number, oldTableNameRaw: string, newTableNameRaw: string): Promise<void> => {
-    const oldTableName = validateTableName(oldTableNameRaw); // Validate old name
-    const newTableName = validateTableName(newTableNameRaw); // Validate new name
+    const oldTableName = validateTableName(oldTableNameRaw); 
+    const newTableName = validateTableName(newTableNameRaw); 
 
     if (oldTableName === newTableName) {
-        // No actual change needed, maybe return success or specific message
         console.log(`Rename request ignored: old name "${oldTableName}" and new name "${newTableName}" are the same.`);
-        // Optionally throw a 400 Bad Request error if preferred
-        // const error = new Error("New table name cannot be the same as the old table name.");
-        // (error as any).statusCode = 400;
-        // throw error;
-        return; // Treat as success (no-op)
+        return;
     }
 
     console.log(`Attempting to RENAME table "${oldTableName}" to "${newTableName}" and update association for User ID ${userId}`);
 
-    // **CRITICAL SECURITY CHECK:** Verify the user actually owns the old table association.
+
     const association = await prisma.users_tables.findUnique({
         where: { user_id_table_name: { user_id: userId, table_name: oldTableName } },
     });
 
     if (!association) {
         const error = new Error(`Table association "${oldTableName}" not found for this user.`);
-        (error as any).statusCode = 404; // Or 403 Forbidden
+        (error as any).statusCode = 404; 
         throw error;
     }
 
-    // --- Check for Conflicts with New Name ---
-    // 1. Check if the user *already* has an association with the new name
     const existingNewAssociation = await prisma.users_tables.findUnique({
          where: { user_id_table_name: { user_id: userId, table_name: newTableName } },
-         select: { table_name: true } // Select minimal data
+         select: { table_name: true }
     });
     if (existingNewAssociation) {
         const error = new Error(`You already have a table associated with the name "${newTableName}".`);
-        (error as any).statusCode = 409; // Conflict
+        (error as any).statusCode = 409; 
         throw error;
     }
 
-    // 2. Check if a physical table with the new name *already exists* in the database.
-    // This requires a raw query against information_schema.
     try {
         const tableExistsCheckSql = `
             SELECT EXISTS (
@@ -353,61 +344,49 @@ export const renameTableAndAssociation = async (userId: number, oldTableNameRaw:
 
         if (tableExistsResult?.[0]?.exists) {
             const error = new Error(`A table with the name "${newTableName}" already exists in the database.`);
-            (error as any).statusCode = 409; // Conflict
+            (error as any).statusCode = 409;
             throw error;
         }
     } catch (checkError: any) {
         console.error(`Error checking existence of potential new table name "${newTableName}":`, checkError);
         throw new Error(`Failed to verify availability of the new table name "${newTableName}".`);
     }
-    // --- End Conflict Checks ---
 
-
-    // Perform rename within a transaction
     try {
         await prisma.$transaction(async (tx) => {
-            // 1. Rename the physical table (using the transaction client 'tx')
-            // IMPORTANT: RENAME is DDL, requires $executeRawUnsafe
             const renameTableSql = `ALTER TABLE "public"."${oldTableName}" RENAME TO "${newTableName}";`;
             console.log("TX: Executing SQL:", renameTableSql);
             await tx.$executeRawUnsafe(renameTableSql);
             console.log(`TX: Physical table "${oldTableName}" renamed to "${newTableName}".`);
-
-            // 2. Update the association entry (using the transaction client 'tx')
-            // We use UPDATE here, targeting the specific old association record.
             console.log(`TX: Updating association for User ${userId}, changing "${oldTableName}" to "${newTableName}"`);
             const updateResult = await tx.users_tables.update({
                 where: {
                     user_id_table_name: {
                         user_id: userId,
-                        table_name: oldTableName, // Target the record with the old name
+                        table_name: oldTableName, 
                     },
                 },
                 data: {
-                    table_name: newTableName, // Set the new name
+                    table_name: newTableName,
                 },
             });
 
             if (!updateResult) {
-                // Should not happen if the initial check passed, but handle defensively
                  throw new Error('Failed to update the table association record during transaction.');
             }
             console.log(`TX: Association updated.`);
-        }); // End transaction
+        });
 
         console.log(`Successfully renamed table "${oldTableName}" to "${newTableName}" and updated association for User ID ${userId}.`);
 
     } catch (error: any) {
         console.error(`Error during transaction for renaming table ${oldTableName} to ${newTableName} (User: ${userId}):`, error);
-        // Handle specific transaction or DDL errors if needed
-        if (error instanceof Prisma.PrismaClientKnownRequestError) {
-             // e.g., P2002 if somehow the new name association conflicts despite checks
-        } else if (error.message?.includes('already exists') || error.code === '42P07') { // Handle potential race condition on RENAME
+        if (error instanceof Prisma.PrismaClientKnownRequestError) {             
+        } else if (error.message?.includes('already exists') || error.code === '42P07') { 
              const conflictError = new Error(`Failed to rename: target table name "${newTableName}" already exists (possibly created concurrently).`);
              (conflictError as any).statusCode = 409;
              throw conflictError;
         }
-        // Re-throw a generic error
         throw new Error(`Could not rename table "${oldTableName}" to "${newTableName}". An error occurred.`);
     }
 };

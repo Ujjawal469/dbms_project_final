@@ -7,8 +7,6 @@ import {
 import { ColumnsType } from 'antd/es/table';
 import * as api from '../../api';
 import { ApiColumnSchema, NewColumnPayload } from '../../api/types';
-// Optionally import moment if needed for DatePicker pre-processing/rendering
-// import moment from 'moment';
 
 const { confirm } = Modal;
 const { Option } = Select;
@@ -29,9 +27,7 @@ const SUPPORTED_COLUMN_TYPES = [
 ];
 
 
-// --- Component Definition ---
 const DataGrid: React.FC<DataGridProps> = ({ tableName }) => {
-  // --- Core State ---
   const [schema, setSchema] = useState<ApiColumnSchema[]>([]);
   const [data, setData] = useState<any[]>([]);
   const [totalRows, setTotalRows] = useState<number>(0);
@@ -40,7 +36,6 @@ const DataGrid: React.FC<DataGridProps> = ({ tableName }) => {
   const [loadingSchema, setLoadingSchema] = useState<boolean>(false);
   const [loadingData, setLoadingData] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
-  // Store the name of the actual primary key column (expected to be 'serial_num')
   const [primaryKeyName, setPrimaryKeyName] = useState<string | null>(null);
 
   // --- Editing State ---
@@ -60,7 +55,6 @@ const DataGrid: React.FC<DataGridProps> = ({ tableName }) => {
 
   // --- Effect for Fetching Schema ---
   useEffect(() => {
-    // Reset state when table name changes or becomes null
     if (!tableName) {
       setSchema([]); setData([]); setError(null); setPrimaryKeyName(null);
       setEditingKey(''); setEditingRowData(null); setIsAddModalVisible(false);
@@ -69,7 +63,6 @@ const DataGrid: React.FC<DataGridProps> = ({ tableName }) => {
       return;
     }
 
-    // Reset state for new table selection
     setLoadingSchema(true); setError(null); setSchema([]); setData([]);
     setCurrentPage(1); setPrimaryKeyName(null); setEditingKey('');
     setEditingRowData(null); setIsAddModalVisible(false); setIsAddColModalVisible(false);
@@ -83,14 +76,11 @@ const DataGrid: React.FC<DataGridProps> = ({ tableName }) => {
              throw new Error("Invalid schema format received.");
         }
         setSchema(fetchedSchema);
-        // Find the primary key (expected to be 'serial_num' based on requirement)
         const pk = fetchedSchema.find((col) => col.isPrimaryKey);
-        // ** Store the actual primary key name ('serial_num') for internal use (edit/delete/key) **
         setPrimaryKeyName(pk ? pk.name : null);
         if (!pk) {
             console.warn(`Table "${tableName}" has no primary key in schema. Edit/Delete may fail.`);
         } else if (pk.name !== 'serial_num') {
-            // If PK is found but isn't 'serial_num', log a warning as our logic assumes it is
              console.warn(`Primary key for table "${tableName}" is "${pk.name}", not the expected "serial_num". Ensure backend handles this correctly.`);
         }
       })
@@ -105,7 +95,6 @@ const DataGrid: React.FC<DataGridProps> = ({ tableName }) => {
 
   // --- Effect for Fetching Data ---
   useEffect(() => {
-    // Prevent fetching if no table, schema is loading, or schema fetch failed
     if (!tableName || loadingSchema || (!loadingSchema && schema.length === 0)) {
         if (!loadingSchema && schema.length === 0 && !error) { // Only clear if no error yet
              setData([]);
@@ -123,22 +112,16 @@ const DataGrid: React.FC<DataGridProps> = ({ tableName }) => {
             throw new Error("Invalid data format received from server.");
         }
 
-        // Generate unique React keys using the ACTUAL primary key ('serial_num') if available
         const processedData = response.data.map((row, index) => {
-          // Use the stored primaryKeyName which should be 'serial_num'
           const pkValue = primaryKeyName ? row[primaryKeyName] : undefined;
           const key = pkValue !== undefined && pkValue !== null
-            ? `${tableName}-pk-${pkValue}` // Key based on actual PK
-            : `row-${tableName}-${currentPage}-${index}`; // Fallback key
-
-          // *** IMPORTANT: We pass the full row data (including serial_num if present)
-          // *** to the state. We filter it out visually in the `columns` generation.
+            ? `${tableName}-pk-${pkValue}`
+            : `row-${tableName}-${currentPage}-${index}`;
           return { ...row, key };
         });
-        console.log("Data processed for state:", processedData); // Log processed data
+        console.log("Data processed for state:", processedData);
         setData(processedData);
         setTotalRows(response.total);
-        // Clear data loading errors on success
         if (error?.startsWith("Failed to load data")) setError(null);
       })
       .catch((err) => {
@@ -147,8 +130,8 @@ const DataGrid: React.FC<DataGridProps> = ({ tableName }) => {
         setData([]); setTotalRows(0);
       })
       .finally(() => setLoadingData(false));
-  // Re-fetch when table, pagination, or schema/PK info changes
-  }, [tableName, currentPage, pageSize, loadingSchema, primaryKeyName, schema, error]); // Added error to dependency
+ 
+  }, [tableName, currentPage, pageSize, loadingSchema, primaryKeyName, schema, error]);
 
 
   // --- Helper Function: Render Appropriate Form Input Based on Schema Type ---
@@ -163,7 +146,6 @@ const DataGrid: React.FC<DataGridProps> = ({ tableName }) => {
       return <InputNumber style={{ width: '100%' }} placeholder={`Enter number`} />;
     } else if (dateTypesLC.includes(colTypeLC)) {
       const showTime = colTypeLC.includes('timestamp') || colTypeLC.includes('datetime');
-      // Consider using `value` prop with moment(editingRowData[col.name]) if storing moment objects
       return <DatePicker style={{ width: '100%' }} showTime={showTime} placeholder={`Select date${showTime ? '/time' : ''}`} format={showTime ? "YYYY-MM-DD HH:mm:ss" : "YYYY-MM-DD"} />;
     } else if (booleanTypesLC.includes(colTypeLC)) {
       return <Select style={{ width: '100%'}} placeholder="Select True/False/Null" allowClear>
@@ -182,23 +164,17 @@ const DataGrid: React.FC<DataGridProps> = ({ tableName }) => {
     inputValues: Record<string, any>,
     schemaRef: ApiColumnSchema[],
     isInsert: boolean = false,
-    pkName: string | null // pkName is 'serial_num'
+    pkName: string | null 
 ): Record<string, any> | null => {
     const payload: Record<string, any> = {};
     let parsingError = false;
     let errors: string[] = [];
 
     schemaRef.forEach(col => {
-        // --- Primary Key Handling ---
-        // ** Always skip the primary key ('serial_num') from the payload **
-        // For INSERT, the DB generates it.
-        // For UPDATE, it's in the URL, not the body.
-        if (col.isPrimaryKey || col.name === pkName) { // Explicitly skip PK by name too
+        if (col.isPrimaryKey || col.name === pkName) {
             return;
         }
 
-        // --- Process non-PK columns ---
-        // (Rest of the logic remains the same: check hasOwnProperty, handle nulls, parse types)
         if (inputValues.hasOwnProperty(col.name)) {
             const rawValue = inputValues[col.name];
             const colTypeLC = col.type.toLowerCase().split('(')[0];
@@ -224,12 +200,11 @@ const DataGrid: React.FC<DataGridProps> = ({ tableName }) => {
                 // Expecting moment object from DatePicker
                 if (rawValue && typeof rawValue.toISOString === 'function') {
                      payload[col.name] = rawValue.toISOString();
-                } else if (rawValue instanceof Date) { // Handle if it's somehow a JS Date
+                } else if (rawValue instanceof Date) { 
                      payload[col.name] = rawValue.toISOString();
-                } else if (typeof rawValue === 'string') { // Handle if already a string (e.g., from initial data)
-                     // Basic validation - might need more robust check
+                } else if (typeof rawValue === 'string') { 
                      try {
-                         new Date(rawValue).toISOString(); // Check if parsable
+                         new Date(rawValue).toISOString(); 
                          payload[col.name] = rawValue;
                      } catch {
                          errors.push(`Invalid date string for "${col.name}": ${rawValue}`);
@@ -241,7 +216,6 @@ const DataGrid: React.FC<DataGridProps> = ({ tableName }) => {
                     parsingError = true;
                 }
             } else if (booleanTypesLC.includes(colTypeLC)) {
-                 // Handle boolean conversion carefully from Select (true, false, null/undefined)
                  if (rawValue === true || rawValue === false) {
                       payload[col.name] = rawValue;
                  } else if (rawValue === null || rawValue === undefined) {
@@ -251,12 +225,12 @@ const DataGrid: React.FC<DataGridProps> = ({ tableName }) => {
                       } else {
                            payload[col.name] = null;
                       }
-                 } else { // Handle potential string "true"/"false" if needed, otherwise error
+                 } else { 
                       errors.push(`Invalid boolean value for "${col.name}": ${rawValue}`);
                       parsingError = true;
                  }
 
-            } else { // Assume text/varchar etc.
+            } else {
                 payload[col.name] = String(rawValue);
             }
         }
@@ -284,8 +258,6 @@ const DataGrid: React.FC<DataGridProps> = ({ tableName }) => {
         setConfirmLoadingAdd(true);
         const values = await addForm.validateFields();
 
-        // Prepare payload, explicitly passing primaryKeyName ('serial_num')
-        // The preparePayload function now knows to always ignore this PK
         const payload = preparePayload(values, schema, true, primaryKeyName);
 
         if (!payload) {
@@ -293,22 +265,16 @@ const DataGrid: React.FC<DataGridProps> = ({ tableName }) => {
         }
 
         console.log("📦 Sending Create Payload:", payload);
-        // Call API (backend service ignores serial_num and lets DB generate it)
         await api.createRecord(tableName, payload);
         //await api.fetchData(tableName, currentPage, pageSize);
         message.success('Record added successfully!');
         setIsAddModalVisible(false);
 
-        // Refetch data for the *first page* to likely see the new record
-        // setCurrentPage(1); // Set state to trigger data refetch for page 1
-        // Data refetch will happen in the useEffect hook for data fetching
         setLoadingData(true);
-        setError(null); // Clear previous errors optimisticallly
+        setError(null);
 
-        // 3. Call the API to fetch data for page 1
-        api.fetchData(tableName, currentPage, pageSize) // Fetch page 1
+        api.fetchData(tableName, currentPage, pageSize)
             .then(response => {
-                // (Same processing logic as in the useEffect)
                 if (!response || !Array.isArray(response.data) || typeof response.total !== 'number') {
                     throw new Error("Invalid data format received after add.");
                 }
@@ -316,7 +282,7 @@ const DataGrid: React.FC<DataGridProps> = ({ tableName }) => {
                     const pkValue = primaryKeyName ? row[primaryKeyName] : undefined;
                     const key = pkValue !== undefined && pkValue !== null
                         ? `${tableName}-pk-${pkValue}`
-                        : `row-${tableName}-1-${index}`; // Use '1' for page number
+                        : `row-${tableName}-1-${index}`;
                     return { ...row, key };
                 });
                 console.log("Data refetched after add:", processedData);
@@ -324,14 +290,11 @@ const DataGrid: React.FC<DataGridProps> = ({ tableName }) => {
                 setTotalRows(response.total);
             })
             .catch(err => {
-                // Handle refetch error specifically
                 console.error(`Refetch failed after add for ${tableName}:`, err);
                 setError(`Refetch failed after add: ${err.message}`);
-                // Optionally clear data/total if refetch fails catastrophically
-                // setData([]); setTotalRows(0);
             })
             .finally(() => {
-                setLoadingData(false); // Stop loading indicator
+                setLoadingData(false);
             });
 
     } catch (errorInfo: any) {
@@ -351,7 +314,6 @@ const DataGrid: React.FC<DataGridProps> = ({ tableName }) => {
 
  const handleEdit = (record: any) => {
     console.log("Editing record:", record);
-    // Potentially convert date strings back to moment objects for DatePicker
     const initialEditData = { ...record };
      schema.forEach(col => {
          const dateTypesLC = ['date', 'timestamp', 'datetime', 'timestamptz'];
@@ -369,11 +331,9 @@ const DataGrid: React.FC<DataGridProps> = ({ tableName }) => {
  const handleCancel = () => { setEditingKey(''); setEditingRowData(null); };
 
  const handleSave = async () => {
-    // Need actual primaryKeyName and the value from the row being edited
     if (!tableName || !primaryKeyName || !editingRowData) return;
 
     const keyToSave = editingKey;
-    // Get the ACTUAL primary key value from the data we stored for editing
     const pkValue = editingRowData[primaryKeyName];
 
     if (pkValue === undefined || pkValue === null) {
@@ -381,14 +341,12 @@ const DataGrid: React.FC<DataGridProps> = ({ tableName }) => {
          return;
     }
 
-    // Use the current editing data (user changes)
     const dataToSave = { ...editingRowData };
-    delete dataToSave.key; // Remove React key property
+    delete dataToSave.key;
 
-    // Prepare payload (will automatically exclude pkName based on the updated helper)
     const payload = preparePayload(dataToSave, schema, false, primaryKeyName);
 
-    if (!payload) { return; } // Payload prep failed
+    if (!payload) { return; }
 
     if (Object.keys(payload).length === 0) {
         message.info("No changes detected to save.");
@@ -398,15 +356,11 @@ const DataGrid: React.FC<DataGridProps> = ({ tableName }) => {
     try {
         setLoadingData(true);
         console.log("📦 Sending Update Payload:", payload);
-        await api.updateRecord(tableName, pkValue, payload); // Use actual pkValue
-
-        // Update local state: Find the record by its React key and update its data
+        await api.updateRecord(tableName, pkValue, payload); 
         setData((prevData) => {
             const index = prevData.findIndex(item => item.key === keyToSave);
             if (index === -1) return prevData;
             const newData = [...prevData];
-            // Merge existing data with the successfully saved payload
-            // Ensure the primary key and React key remain consistent
             newData[index] = { ...newData[index], ...payload, key: keyToSave };
             return newData;
         });
@@ -417,15 +371,14 @@ const DataGrid: React.FC<DataGridProps> = ({ tableName }) => {
     } catch (err: any) {
         console.error('Update Row Failed:', err);
         const errorMsg = err.response?.data?.message || err.message || 'Unknown error';
-        setError(`Failed to update record: ${errorMsg}`); // Show error in alert
+        setError(`Failed to update record: ${errorMsg}`);
         message.error(`Failed to update record: ${errorMsg}`);
-        // Keep editing state on error
     } finally {
         setLoadingData(false);
     }
  };
 
- // Update temporary editingRowData state when an inline input changes
+
  const handleEditingInputChange = (value: any, dataIndex: string ) => {
     if (!editingRowData) return;
     console.log(`Input change: ${dataIndex} =`, value);
@@ -433,14 +386,12 @@ const DataGrid: React.FC<DataGridProps> = ({ tableName }) => {
  };
 
 
- // --- Delete Handler ---
  const handleDelete = (primaryKeyValue: string | number) => {
-     // Still need the actual primary key value for the API call
     if (!tableName || !primaryKeyName) {
         message.error("Cannot delete row: Table or Primary Key information missing.");
         return;
     }
-    const displayValue = String(primaryKeyValue); // Value to show in confirmation
+    const displayValue = String(primaryKeyValue); 
 
     confirm({
         title: 'Are you sure delete this record?',
@@ -452,21 +403,17 @@ const DataGrid: React.FC<DataGridProps> = ({ tableName }) => {
                 setLoadingData(true);
                 message.loading({ content: `Deleting record...`, key: messageKey, duration: 0 });
 
-                // Call API with the actual primary key value
                 await api.deleteRecord(tableName, primaryKeyValue);
 
                 message.success({ content: 'Record deleted successfully!', key: messageKey, duration: 2 });
                 if (editingKey === `${tableName}-pk-${primaryKeyValue}`) { handleCancel(); }
 
-                // Refetch data for the current page (or previous if last item deleted)
                 setError(null);
                 const pageToFetch = (data.length === 1 && currentPage > 1) ? currentPage - 1 : currentPage;
-                // If page changes, update state to trigger refetch
                 if (pageToFetch !== currentPage) {
                     setCurrentPage(pageToFetch);
                 } else {
-                     // If page doesn't change, manually trigger refetch (useEffect won't run)
-                     setLoadingData(true); // Show loading manually
+                     setLoadingData(true);
                      api.fetchData(tableName, pageToFetch, pageSize)
                         .then(response => {
                              const processedData = response.data.map((row, index) => ({
@@ -483,9 +430,8 @@ const DataGrid: React.FC<DataGridProps> = ({ tableName }) => {
             } catch (err: any) {
                 message.error({ content: `Failed to delete record: ${err.message || 'Unknown error'}`, key: messageKey, duration: 4 });
                 console.error('Delete Row Failed:', err);
-                setError(`Failed to delete record: ${err.message}`); // Show in alert
+                setError(`Failed to delete record: ${err.message}`);
             } finally {
-                 // Ensure loading indicator stops if refetch wasn't triggered via page change
                  if (currentPage === ((data.length === 1 && currentPage > 1) ? currentPage - 1 : currentPage)) {
                      // setLoadingData(false); // Handled by manual refetch finally block now
                  }
@@ -497,7 +443,7 @@ const DataGrid: React.FC<DataGridProps> = ({ tableName }) => {
 
  // --- Add Column Handlers (Remain the same) ---
  const showAddColModal = () => { addColForm.resetFields(); setIsAddColModalVisible(true); };
- const handleAddColOk = async () => { /* ... same as before ... */
+ const handleAddColOk = async () => { 
     if (!tableName) return;
     try {
         setConfirmLoadingAddCol(true);
@@ -541,47 +487,35 @@ const DataGrid: React.FC<DataGridProps> = ({ tableName }) => {
 };
  const handleAddColCancel = () => { setIsAddColModalVisible(false); };
 
-
- // --- Build Table Columns Dynamically ---
  const columns = useMemo((): ColumnsType<any> => {
-    // Return empty if no schema yet or schema failed loading
     if (!schema || schema.length === 0 || !primaryKeyName) return [];
 
-    // --- 1. Define the "S.No." Column ---
     const serialNumberColumn: ColumnsType<any>[0] = {
         title: 'S.No.',
-        key: 'frontend_sno', // Unique key for this virtual column
-        width: 70, // Fixed width for serial number
-        fixed: 'left', // Optional: make it sticky
+        key: 'frontend_sno',
+        width: 70,
+        fixed: 'left',
         align: 'center',
         render: (text: any, record: any, index: number) => {
-            // Calculate serial number based on current page and row index
             return (currentPage - 1) * pageSize + index + 1;
         },
     };
 
-    // --- 2. Generate Columns for Actual Data (excluding serial_num) ---
     const dataColumns: ColumnsType<any> = schema
-        // Filter out the actual primary key column ('serial_num') from display
         .filter(col => col.name !== primaryKeyName)
         .map((col) => {
-            // Determine if the column is editable (non-PK, non-FK)
-            const editable = !col.isPrimaryKey && !col.isForeignKey; // Still prevent PK/FK edit
+            const editable = !col.isPrimaryKey && !col.isForeignKey;
 
             return {
                 title: col.name,
                 dataIndex: col.name,
-                key: col.name, // Use actual column name as key
+                key: col.name,
                 ellipsis: !isEditing({ key: editingKey }),
-                width: 150, // Default width
-                // --- Render Function (Display / Edit Input) ---
+                width: 150, 
                 render: (text: any, record: any) => {
                     const editing = isEditing(record);
-
-                    // If editing this row AND this column is editable
                     if (editing && editable) {
                         const InputComponent = renderFormInput(col);
-                        // Clone element to pass specific props for inline editing
                         return React.cloneElement(InputComponent, {
                             value: editingRowData ? editingRowData[col.name] : undefined,
                             onChange: (eOrValue: any) => {
@@ -592,9 +526,7 @@ const DataGrid: React.FC<DataGridProps> = ({ tableName }) => {
                             style: { ...InputComponent.props.style, width: 'calc(100% - 10px)'}
                         });
                     }
-                    // --- Display Mode ---
                     else {
-                         // (Display logic remains the same: format dates, booleans, NULLs)
                         const colTypeLC = col.type.toLowerCase().split('(')[0];
                         const dateTypesLC = ['date', 'timestamp', 'datetime', 'timestamptz'];
                         const booleanTypesLC = ['boolean', 'bool'];
@@ -602,21 +534,19 @@ const DataGrid: React.FC<DataGridProps> = ({ tableName }) => {
                         if (text === null || text === undefined) {
                             return <i style={{ color: '#ccc' }}>NULL</i>;
                         } else if (booleanTypesLC.includes(colTypeLC)) {
-                            return String(text); // 'true' or 'false'
+                            return String(text);
                         } else if (dateTypesLC.includes(colTypeLC)) {
                             try {
-                                // Attempt locale string formatting
                                 return new Date(text).toLocaleString();
-                            } catch (e) { return String(text); } // Fallback
+                            } catch (e) { return String(text); } 
                         }
-                        return String(text); // Default string display
+                        return String(text); 
                     }
-                }, // End render
-            }; // End column definition
-        }); // End map
+                }, 
+            }; 
+        }); 
 
-    // --- 3. Define the "Actions" Column ---
-    // Added only if a primary key was identified (needed for edit/delete)
+    // --- Define the "Actions" Column ---
     const actionsColumn: ColumnsType<any>[0] | null = primaryKeyName ? {
         title: 'Actions',
         key: 'actions',
@@ -624,7 +554,6 @@ const DataGrid: React.FC<DataGridProps> = ({ tableName }) => {
         fixed: 'right',
         render: (_, record) => {
             const editing = isEditing(record);
-            // Get the ACTUAL primary key value from the record data
             const pkValue = record[primaryKeyName];
 
             return (
@@ -646,14 +575,13 @@ const DataGrid: React.FC<DataGridProps> = ({ tableName }) => {
         },
     } : null; // No actions column if no PK
 
-    // --- 4. Combine Columns ---
     return [
-        serialNumberColumn, // Add "S.No." first
-        ...dataColumns,     // Add the actual data columns
-        ...(actionsColumn ? [actionsColumn] : []) // Add actions column if it exists
+        serialNumberColumn, 
+        ...dataColumns,     
+        ...(actionsColumn ? [actionsColumn] : []) 
     ];
 
- }, [schema, primaryKeyName, editingKey, editingRowData, loadingData, currentPage, pageSize]); // Dependencies
+ }, [schema, primaryKeyName, editingKey, editingRowData, loadingData, currentPage, pageSize]); 
 
 
  // --- Component Render ---

@@ -58,7 +58,7 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
 export const isLoggedIn = async (req: Request, res: Response) => {
   if (req.session && req.session.userId) {
     const userFromSession = req.session.user;
-
+    console.log(userFromSession);
     if (userFromSession) {
          console.log(`User is logged in (from session): ${userFromSession.username}`);
          return res.status(200).json({ loggedIn: true, user: userFromSession });
