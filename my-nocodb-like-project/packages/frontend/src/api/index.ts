@@ -155,24 +155,72 @@ export const fetchSchema = async (tableName: string): Promise<ApiColumnSchema[]>
 
 // ------------------------------------- Fetch Paginated Data ---------------------------------
 export const fetchData = async (
-  tableName: string,
-  page: number,
-  pageSize: number
-  // Add filters, sorts parameters here later
+  tableName: string, // <<< Added tableName back as the first argument
+  params: { // <<< params object as the second argument
+      page: number;
+      limit: number; // Use 'limit' for backend convention
+      filters?: FilterCondition[];
+      search?: string;
+      sort_by?: string;
+      sort_order?: 'asc' | 'desc';
+      group_by?: string;
+      // Add other potential parameters here
+  }
 ): Promise<ApiFetchDataResponse> => {
-   if (!tableName) return Promise.resolve({ data: [], total: 0 });
+   // Check for tableName early
+   if (!tableName) {
+       console.warn("API: fetchData called without tableName.");
+       return Promise.resolve({ data: [], total: 0 });
+   }
+
+   // Prepare the parameters object that will be sent to axios
+   const requestParams: Record<string, any> = {
+      page: params.page,
+      limit: params.limit,
+      // Conditionally add other simple parameters if they are provided
+      ...(params.search && { search: params.search }),
+      ...(params.sort_by && { sort_by: params.sort_by }),
+      ...(params.sort_order && { sort_order: params.sort_order }),
+      ...(params.group_by && { group_by: params.group_by }),
+   };
+
+   // Handle filters: Stringify if they exist and are not empty
+   if (params.filters && Array.isArray(params.filters) && params.filters.length > 0) {
+      try {
+          requestParams.filters = JSON.stringify(params.filters);
+          // Optional: Log the stringified filters for debugging
+          // console.log("API: Sending stringified filters:", requestParams.filters);
+      } catch (e) {
+          console.error("API: Error stringifying filters, sending request without them.", e);
+          // Decide if you want to throw an error or proceed without filters
+      }
+   }
+
   try {
-    console.log(`API: Fetching data for table "${tableName}" (Page: ${page}, Size: ${pageSize})...`);
+    // Log the actual request being made
+    console.log(`API: Fetching data for table "${tableName}" with params:`, requestParams);
+
+    // Make the GET request with the prepared params
     const res = await apiClient.get<ApiFetchDataResponse>(`/data/tables/${tableName}`, {
-      params: { page, pageSize /*, filters, sorts */ }, withCredentials: true
+      params: requestParams, // Pass the prepared params object here
+      withCredentials: true
     });
+
+     // Standard response validation
      console.log(`API: Data for "${tableName}" fetched successfully (Total: ${res.data?.total}).`);
      if (!res.data || !Array.isArray(res.data.data) || typeof res.data.total !== 'number') {
         throw new Error("Invalid data format received from server.");
      }
     return res.data;
   } catch (err) {
-    throw handleApiError(err as AxiosError | Error, `fetchData(${tableName})`);
+     // Add stringified params to error context for better debugging
+     let paramsString = "{ PII Filtered }"; // Avoid logging potentially sensitive filter values directly
+     try {
+         // Attempt to stringify params for logging, potentially redacting sensitive parts if needed
+         paramsString = JSON.stringify(requestParams);
+     } catch { /* ignore stringify error for logging */ }
+     const context = `fetchData(tableName: ${tableName}, params: ${paramsString})`;
+     throw handleApiError(err as AxiosError | Error, context);
   }
 };
 
