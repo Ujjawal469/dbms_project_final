@@ -1,6 +1,8 @@
-import { Request, Response } from 'express';
+import { Request, Response, NextFunction } from 'express';
 import * as dataService from '../services/data.service';
+import * as metaService from '../services/meta.service';
 import { convertBigIntsToStrings } from '../utils/jsonUtils';
+
 interface FilterCondition {
     id?: number;
     column?: string;
@@ -9,24 +11,28 @@ interface FilterCondition {
     logicalOperator?: 'AND' | 'OR';
 }
 
-
-export const getTableData = async (req: Request, res: Response) => {
+export const getTableData = async (req: Request, res: Response, next: NextFunction) => { 
     try {
         const userId = req.session?.userId;
-
-        if (!userId) {
-             return res.status(401).json({ message: 'Unauthorized. Please log in.' });
+        if(!userId) {
+            return res.status(401).json({ message: 'Unauthorized. Please log in.' });
+        }
+        const dbId = parseInt(req.params.dbId, 10);
+        if (isNaN(dbId)) {
+            return res.status(400).json({ message: 'Invalid Database ID.' });
         }
         const { tableName } = req.params;
-        const reqLimit = parseInt(req.query.limit as string || '20', 10);
-        const reqPage = parseInt(req.query.page as string || '1', 10);
-        const limit = Math.min(Math.max(1, isNaN(reqLimit) ? 20 : reqLimit), 100);
-        const page = Math.max(1, isNaN(reqPage) ? 1 : reqPage);
+        if (!tableName || tableName.trim().length === 0) {
+            return res.status(400).json({ message: 'Table name parameter is required.' });
+        }
+        const table_name = tableName.trim();
+        const page = parseInt(req.query.page as string || '1', 10) || 1;
+        const pageSize = parseInt(req.query.pageSize as string || '20', 10) || 20;
+        const limit = Math.min(Math.max(1, pageSize), 100);
         const offset = (page - 1) * limit;
-
-        // --- Filters ---
         let filters: FilterCondition[] | undefined = undefined;
         const filtersQueryParam = req.query.filters as string;
+        console.log("Filters query param:", filtersQueryParam);
         if (filtersQueryParam) {
             try {
                 filters = JSON.parse(filtersQueryParam);
@@ -41,123 +47,111 @@ export const getTableData = async (req: Request, res: Response) => {
                 filters = undefined;
             }
         }
-
-        // --- Table Name Validation ---
-        if (!tableName) {
-            return res.status(400).json({ message: 'Table name parameter is required.' });
-        }
-        // Append userId (ensure this naming convention is consistent)
-        const finalTableName = tableName + "_" + userId;
-
-        // --- Call Service ---
-        const result = await dataService.getData(finalTableName, { limit, offset, filters });
-
-        // --- Response ---
-        const finalResponseData = convertBigIntsToStrings(result);
-        res.status(200).json(finalResponseData); // Send { data: [...], total: ... }
-
+        console.log(`CONTROLLER: getTableData - User: ${userId}, DB: ${dbId}, Table: "${table_name}", Page: ${page}, Limit: ${limit}`);
+        const result = await dataService.getData(userId, dbId, table_name, { limit, offset, filters });
+        const final = convertBigIntsToStrings(result);
+        res.status(200).json(final);
     } catch (error: any) {
-        console.error('Error in getTableData controller:', error);
-        // Provide more context in the error response if possible
-        res.status(500).json({ message: error.message || 'Internal server error while fetching table data.' });
+        console.error(`CONTROLLER ERROR (getTableData): User ${req.session?.userId}, DB ${req.params.dbId}, Table "${req.params.tableName}"`, error);
+        next(error);
     }
 };
 
-// --- Other controller functions (addRow, updateExistingRow, deleteExistingRow) remain unchanged ---
-
-export const addRow = async (req: Request, res: Response) => {
+export const addRow = async (req: Request, res: Response, next: NextFunction) => {
     try {
         const userId = req.session?.userId;
-
         if (!userId) {
-             return res.status(401).json({ message: 'Unauthorized. Please log in.' });
+            return res.status(401).json({ message: 'Unauthorized. Please log in.' });
+        }
+        const dbId = parseInt(req.params.dbId, 10);
+        if (isNaN(dbId)) {
+            return res.status(400).json({ message: 'Invalid Database ID.' });
         }
         const { tableName } = req.params;
         const rowData = req.body;
-
-        if (!tableName || !rowData || typeof rowData !== 'object') {
-            return res.status(400).json({ message: 'Invalid request: Missing table name or row data.' });
+        if (!tableName || tableName.trim().length === 0 || !rowData || typeof rowData !== 'object') {
+            return res.status(400).json({ message: 'Invalid request: Table name and row data object required.' });
         }
-        const finalTableName = tableName + "_" + userId;
-        const newRow = await dataService.createRow(finalTableName, rowData);
+        const table_name = tableName.trim();
+        console.log(`CONTROLLER: addRow - User: ${userId}, DB: ${dbId}, Table: "${table_name}"`, rowData);
+        const newRow = await dataService.createRow(userId, dbId, table_name, rowData);
+        if (!newRow) {
+            return res.status(500).json({ message: 'Failed to add row. Please try again.' });
+        }
         const final = convertBigIntsToStrings(newRow);
+        console.log(`CONTROLLER: Row added successfully. New row ID: ${final.id}`);
         res.status(201).json(final);
     } catch (error: any) {
-        console.error('Error adding row:', error);
-        // Send back specific constraint violation errors if possible
-        res.status(500).json({ message: error.message || 'Internal server error while adding row.' });
+        console.error(`CONTROLLER ERROR (addRow): User ${req.session?.userId}, DB ${req.params.dbId}, Table "${req.params.tableName}"`, error);
+        next(error);
     }
 };
 
-export const updateExistingRow = async (req: Request, res: Response) => {
+export const updateExistingRow = async (req: Request, res: Response, next: NextFunction) => {
     try {
         const userId = req.session?.userId;
-
         if (!userId) {
-             return res.status(401).json({ message: 'Unauthorized. Please log in.' });
+            return res.status(401).json({ message: 'Unauthorized. Please log in.' });
+        }
+        const dbId = parseInt(req.params.dbId, 10);
+        if (isNaN(dbId)) {
+            return res.status(400).json({ message: 'Invalid Database ID.' });
         }
         const { tableName, pkValue } = req.params;
         const rowData = req.body;
-
-        if (!tableName || !pkValue || !rowData || typeof rowData !== 'object' || Object.keys(rowData).length === 0) {
-            return res.status(400).json({ message: 'Invalid request: Missing table name, primary key value, or update data.' });
+        if (!tableName || tableName.trim().length === 0 || !pkValue || !rowData || typeof rowData !== 'object') {
+            return res.status(400).json({ message: 'Invalid request: Table name, primary key value, and row data object required.' });
         }
-        const finalTableName = tableName + "_" + userId;
-        const pkColumn = await dataService.getPrimaryKeyColumn(finalTableName);
+        const table_name = tableName.trim();
+        console.log(`CONTROLLER: updateExistingRow - User: ${userId}, DB: ${dbId}, Table: "${table_name}", PK: ${pkValue}`, rowData);
+        const pkColumn = await dataService.getPrimaryKeyColumn(userId, dbId, table_name);
         if (!pkColumn) {
-            // This might indicate the table doesn't exist or has no PK
-            return res.status(404).json({ message: `Cannot determine primary key for table "${finalTableName}". Table might not exist or lacks a primary key.` });
+            const physicalTableName = metaService.getPhysicalTableName(table_name, userId, dbId); 
+            return res.status(400).json({ message: `Cannot determine primary key for table "${table_name}" (physical: ${physicalTableName}). Update failed.` });
         }
-
-        const updatedRow = await dataService.updateRow(finalTableName, pkValue, pkColumn, rowData);
+        console.log(`CONTROLLER: Found PK column "${pkColumn}" for update.`);
+        const updatedRow = await dataService.updateRow(userId, dbId, table_name, pkValue, pkColumn, rowData);
         const final = convertBigIntsToStrings(updatedRow);
         res.status(200).json(final);
     } catch (error: any) {
-        console.error('Error updating row:', error);
-         // Check if the error message indicates "not found" from the service layer
-        if (error.message?.includes('not found')) {
-             return res.status(404).json({ message: error.message });
-        }
-        res.status(500).json({ message: error.message || 'Internal server error while updating row.' });
+        console.error(`CONTROLLER ERROR (updateExistingRow): User ${req.session?.userId}, DB ${req.params.dbId}, Table "${req.params.tableName}", PK ${req.params.pkValue}`, error);
+        next(error);
     }
 };
 
-export const deleteExistingRow = async (req: Request, res: Response) => {
+export const deleteExistingRow = async (req: Request, res: Response, next: NextFunction) => {
     try {
         const userId = req.session?.userId;
-
         if (!userId) {
-             return res.status(401).json({ message: 'Unauthorized. Please log in.' });
+            return res.status(401).json({ message: 'Unauthorized. Please log in.' });
+        }
+        const dbId = parseInt(req.params.dbId, 10);
+        if (isNaN(dbId)) {
+            return res.status(400).json({ message: 'Invalid Database ID.' });
         }
         const { tableName, pkValue } = req.params;
-
-        if (!tableName || !pkValue) {
-            return res.status(400).json({ message: 'Invalid request: Missing table name or primary key value.' });
+        if (!tableName || tableName.trim().length === 0 || !pkValue) {
+            return res.status(400).json({ message: 'Invalid request: Table name and primary key value required.' });
         }
-        const finalTableName = tableName + "_" + userId;
-        const pkColumn = await dataService.getPrimaryKeyColumn(finalTableName);
+        const table_name = tableName.trim();
+        console.log(`CONTROLLER: deleteExistingRow - User: ${userId}, DB: ${dbId}, Table: "${table_name}", PK: ${pkValue}`);
+        const pkColumn = await dataService.getPrimaryKeyColumn(userId, dbId, table_name);
         if (!pkColumn) {
-             return res.status(404).json({ message: `Cannot determine primary key for table "${finalTableName}". Table might not exist or lacks a primary key.` });
+            const physicalTableName = metaService.getPhysicalTableName(table_name, userId, dbId);
+            return res.status(400).json({ message: `Cannot determine primary key for table "${table_name}" (physical: ${physicalTableName}). Delete failed.` });
         }
-
-        const result = await dataService.deleteRow(finalTableName, pkValue, pkColumn);
-
+        console.log(`CONTROLLER: Found PK column "${pkColumn}" for delete.`);
+        const result = await dataService.deleteRow(userId, dbId, table_name, pkValue, pkColumn);
         if (result.deleted) {
-            res.status(204).send(); // Standard success response for DELETE with no content
+            res.status(204).send();
         } else {
-            // If the service indicates 0 rows affected, it means the row wasn't found
-            res.status(404).json({ message: 'Row not found for deletion.' });
+            res.status(404).json({ message: `Row with ${pkColumn} = ${pkValue} not found for deletion in table "${table_name}".` });
         }
     } catch (error: any) {
-        console.error('Error deleting row:', error);
-         // Handle specific errors like FK constraints if needed
-        if (error.message?.includes('foreign key constraint')) {
-             return res.status(409).json({ message: 'Cannot delete row because it is referenced by other records.' }); // 409 Conflict
-        }
-        res.status(500).json({ message: error.message || 'Internal server error while deleting row.' });
+        console.error(`CONTROLLER ERROR (deleteExistingRow): User ${req.session?.userId}, DB ${req.params.dbId}, Table "${req.params.tableName}", PK ${req.params.pkValue}`, error);
+        next(error);
     }
 };
-
 
 export const uploadTableData = async (req: Request, res: Response) => {
     try {
@@ -166,23 +160,42 @@ export const uploadTableData = async (req: Request, res: Response) => {
              return res.status(401).json({ message: 'Unauthorized. Please log in.' });
         }
         const { tableName } = req.params;
+        const dbIdParam = req.params.dbId;
         const file = req.file;
-        console.log(`file obtained: ${file}`);
-
         if (!tableName) {
             return res.status(400).json({ message: 'Table name parameter is required.' });
+        }
+        if (!dbIdParam) {
+            return res.status(400).json({ message: 'Database ID parameter is required.' });
+        }
+        const dbId = parseInt(dbIdParam, 10);
+        if (isNaN(dbId)) {
+            return res.status(400).json({ message: 'Invalid Database ID format in URL.' });
         }
         if (!file) {
             return res.status(400).json({ message: 'No file uploaded or file rejected by filter.' });
         }
-        const finalTableName = tableName + "_" + userId;
-        console.log(`Upload request received for table: ${finalTableName}, file: ${file.originalname}, size: ${file.size}`);
-        const result = await dataService.processCsvUpload(finalTableName, file.buffer);
-        res.status(result.tableCreated ? 201 : 200).json(result);
+        const baseTableName = tableName;
+
+        console.log(`CONTROLLER: Upload request received for DB: ${dbId}, Table: ${baseTableName}, User: ${userId}, File: ${file.originalname}`);
+
+        // --- Call Service with ALL FOUR required arguments ---
+        const result = await dataService.processCsvUpload(
+            userId,         // 1st argument
+            dbId,           // 2nd argument
+            baseTableName,  // 3rd argument (logical name)
+            file.buffer     // 4th argument (file content)
+        );
+
+        // --- Send Response ---
+        // Use the correct flag from the service response ('tableRebuilt')
+        res.status(result.tableRebuilt ? 201 : 200).json(result); // 201 if created/rebuilt
 
     } catch (error: any) {
-        console.error(`Error processing upload for table ${req.params.tableName}:`, error);
-        res.status(error.message?.includes("Schema mismatch") || error.message?.includes("Invalid file type") || error.message?.includes("CSV headers") ? 400 : 500)
+        console.error(`CONTROLLER ERROR processing upload for table ${req.params.tableName} (DB: ${req.params.dbId}):`, error);
+        // Use status code from service error if available, otherwise default based on error type
+        const statusCode = (error as any).statusCode || 500; // statusCode might be set by service validation
+        res.status(statusCode)
            .json({ message: error.message || 'Internal server error during file upload processing.' });
     }
 };

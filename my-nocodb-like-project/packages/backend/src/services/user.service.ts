@@ -26,14 +26,12 @@ export const signup = async (credentials: UserInterface.SignupCredentials): Prom
   const existingUser = await prisma.users.findUnique({
     where: { email },
   });
-
   if (existingUser) {
     const error = new Error('Email address is already in use.');
     (error as any).statusCode = 409;
     throw error;
   }
   const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
-
   try {
     const newUser = await prisma.users.create({
       data: {
@@ -44,7 +42,6 @@ export const signup = async (credentials: UserInterface.SignupCredentials): Prom
     });
     const { password_hash, ...safeUserData } = newUser;
     return safeUserData;
-
   } catch (error) {
     console.error("Error during user creation:", error);
     if (error instanceof Prisma.PrismaClientKnownRequestError) {
@@ -54,7 +51,6 @@ export const signup = async (credentials: UserInterface.SignupCredentials): Prom
              throw conflictError;
          }
     }
-    // Throw a generic error for other DB issues
     throw new Error('Failed to create user due to a database error.');
   }
 };
@@ -72,7 +68,6 @@ export const login = async (credentials: UserInterface.LoginCredentials): Promis
   if (!email || !password) {
     throw new Error('Email and password are required.');
   }
-
   const user = await prisma.users.findUnique({
     where: { email },
   });

@@ -11,50 +11,6 @@ declare module 'express-session' {
   }
 }
 
-export const signup = async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { username, email, password } = req.body;
-    if (!username || !email || !password) {
-      return res.status(400).json({ message: 'Username, email, and password are required.' });
-    }
-
-    const newUser = await userService.signup({ username, email, password });
-
-    console.log(`User signed up: ${newUser.username} (ID: ${newUser.user_id})`);
-    res.status(201).json({ message: 'Signup successful!', user: newUser });
-
-  } catch (error: any) {
-     console.error("Signup Controller Error:", error.message);
-     next(error);
-  }
-};
-
-
-export const login = async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { email, password } = req.body;
-
-    if (!email || !password) {
-      return res.status(400).json({ message: 'Email and password are required.' });
-    }
-
-    const user = await userService.login({ email, password });
-
-    req.session.userId = user.user_id;
-    req.session.user = user; 
-
-    console.log(`User logged in: ${user.username} (ID: ${user.user_id})`);
-    res.status(200).json({ message: 'Login successful!', user: user });
-
-  } catch (error: any) {
-     console.error("Login Controller Error:", error.message);
-     next(error);
-  }
-};
-
-
-//  Checks if the user is currently logged in.
- 
 export const isLoggedIn = async (req: Request, res: Response) => {
   if (req.session && req.session.userId) {
     const userFromSession = req.session.user;
@@ -85,7 +41,44 @@ export const isLoggedIn = async (req: Request, res: Response) => {
 
   } else {
     console.log("User is not logged in (no valid session).");
-    return res.status(401).json({ loggedIn: false, message: "User not logged in" }); // Use 401 Unauthorized
+    return res.status(401).json({ loggedIn: false, message: "User not logged in" });
+  }
+};
+
+export const signup = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    let { username, email, password } = req.body;
+    if (!username || !email || !password) {
+      return res.status(400).json({ message: 'Username, email, and password are required.' });
+    }
+    username = username.trim() + "_";
+    let newUser = await userService.signup({ username, email, password });
+    newUser.username = newUser.username.replace(/_$/, "");
+    console.log(`User signed up: ${newUser.username} (ID: ${newUser.user_id})`);
+    res.status(201).json({ message: 'Signup successful!', user: newUser });
+
+  } catch (error: any) {
+     console.error("Signup Controller Error:", error.message);
+     next(error);
+  }
+};
+
+
+export const login = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password) {
+      return res.status(400).json({ message: 'Email and password are required.' });
+    }
+    const user = await userService.login({ email, password });
+    req.session.userId = user.user_id;
+    req.session.user = user; 
+    console.log(`User logged in: ${user.username} (ID: ${user.user_id})`);
+    res.status(200).json({ message: 'Login successful!', user: user });
+
+  } catch (error: any) {
+     console.error("Login Controller Error:", error.message);
+     next(error);
   }
 };
 

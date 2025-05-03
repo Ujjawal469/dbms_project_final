@@ -13,7 +13,7 @@
     "prisma:studio": "prisma studio"
   },
   "dependencies": {
-    "@prisma/client": "^6.5.0",
+    "@prisma/client": "^6.7.0",
     "bcrypt": "^5.1.1",
     "cors": "^2.8.5",
     "csv-parser": "^3.2.0",
@@ -32,7 +32,7 @@
     "@types/node": "^20.12.12",
     "concurrently": "^8.2.2",
     "nodemon": "^3.1.0",
-    "prisma": "^6.5.0",
+    "prisma": "^6.7.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.4.5"
   }

@@ -1,54 +1,67 @@
-// src/components/DataGrid/DataGrid.tsx
-
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
-Table, Spin, Alert, Empty, Pagination, Button, Input, Modal, Form, Select, InputNumber, DatePicker, Checkbox, Space, message, Upload, Tooltip, Typography, Dropdown, Menu // Added Upload, Tooltip, Typography, Dropdown, Menu
+    Table, Spin, Alert, Empty, Pagination, Button, Input, Modal, Form, Select, InputNumber, DatePicker, Checkbox, Space, message, Upload, Tooltip, Typography, Dropdown, Menu
 } from 'antd';
-import { ColumnsType, TablePaginationConfig, SorterResult, SortOrder, Key } from 'antd/es/table/interface'; // Added SorterResult, SortOrder, Key
+import { ColumnsType, TablePaginationConfig, SorterResult, SortOrder, Key } from 'antd/es/table/interface';
 import * as api from '../../api';
 import {
-FilterOutlined, SearchOutlined, UploadOutlined, GroupOutlined, ClearOutlined, DownOutlined, PlusOutlined, DeleteOutlined, InboxOutlined // Added new icons
+    FilterOutlined, SearchOutlined, UploadOutlined, GroupOutlined, ClearOutlined, DownOutlined, PlusOutlined, DeleteOutlined, InboxOutlined
 } from '@ant-design/icons';
-import { ApiColumnSchema, NewColumnPayload } from '../../api/types'; // Assuming NewColumnPayload exists
-import type { UploadFile, UploadProps, RcFile } from 'antd'; // For CSV Upload
-import dayjs from 'dayjs'; // Import dayjs for DatePicker compatibility
-import { debounce } from 'lodash'; // Import debounce
+import { ApiColumnSchema, NewColumnPayload } from '../../api/types';
+import type { UploadFile, UploadProps, RcFile } from 'antd';
+import dayjs from 'dayjs';
+import { debounce } from 'lodash';
+
+
+interface FetchParams {
+    page: number;
+    limit: number;
+    filters?: FilterCondition[];
+    group_by?: string | null; 
+    // Backend search/sort could be added here if needed in the future
+    // search?: string;
+    // sort_by?: string;
+    // sort_order?: "asc" | "desc";
+}
 
 const { confirm } = Modal;
 const { Option } = Select;
-const { Title, Text } = Typography; // For table title and text ellipsis
-const { Dragger } = Upload; // Import Dragger for upload area
+const { Title, Text } = Typography;
+const { Dragger } = Upload;
 
 interface DataGridProps {
-tableName: string | null;
+    dbId: number | null;
+    tableName: string | null;
 }
 
 type EditingRowData = Record<string, any> | null;
 
-// Define state structures for new features
+
 interface SortConfig {
     field: Key | null;
     order: SortOrder | null;
 }
 
-interface FilterCondition{
-    id: number; // Unique ID for React key prop
+
+interface FilterCondition {
+    id: number; 
     column?: string;
     operator?: string;
     value?: any;
-    logicalOperator?: 'AND' | 'OR'; // Operator connecting this condition to the NEXT one
+    logicalOperator?: 'AND' | 'OR'; 
 }
 
-// Supported types for the Add Column modal dropdown
+
 const SUPPORTED_COLUMN_TYPES = [
     'TEXT', 'VARCHAR',
-    'INTEGER', 'INT', 'BIGINT',
+    'INTEGER', 'INT', 'BIGINT', 'SMALLINT', 'SERIAL', 'BIGSERIAL', 
     'NUMERIC', 'DECIMAL', 'FLOAT', 'REAL', 'DOUBLE PRECISION',
     'BOOLEAN', 'BOOL',
-    'DATE', 'TIMESTAMP', 'TIMESTAMP WITH TIME ZONE'
+    'DATE', 'TIMESTAMP', 'TIMESTAMP WITH TIME ZONE', 'DATETIME', 
+    'JSON', 'JSONB', 'UUID' 
 ];
 
-// Define operators for filtering
+
 const FILTER_OPERATORS = [
     { label: 'Equals (=)', value: '=' },
     { label: 'Not Equals (!=)', value: '!=' },
@@ -62,590 +75,768 @@ const FILTER_OPERATORS = [
     { label: 'Is Not Null', value: 'IS NOT NULL' },
 ];
 
-// Accepted file types for upload
+
 const ACCEPTED_UPLOAD_TYPES = [
     '.csv',
-    'text/csv', // Standard CSV MIME type
-    'application/vnd.ms-excel', // .xls
-    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // .xlsx
-    // Add other types if needed, e.g., application/json, text/plain
+    'text/csv', 
+    'application/vnd.ms-excel', 
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 
+    
 ];
-const ACCEPTED_UPLOAD_EXTENSIONS_STRING = ".csv, .xls, .xlsx"; // For user display
+const ACCEPTED_UPLOAD_EXTENSIONS_STRING = ".csv, .xls, .xlsx"; 
 
-const DataGrid: React.FC<DataGridProps> = ({ tableName }) => {
-const [schema, setSchema] = useState<ApiColumnSchema[]>([]);
-const [data, setData] = useState<any[]>([]); // Raw data from backend for the current page
-const [totalRows, setTotalRows] = useState<number>(0);
-const [currentPage, setCurrentPage] = useState<number>(1);
-const [pageSize, setPageSize] = useState<number>(20);
-const [loadingSchema, setLoadingSchema] = useState<boolean>(false);
-const [loadingData, setLoadingData] = useState<boolean>(false);
-const [error, setError] = useState<string | null>(null);
+const DataGrid: React.FC<DataGridProps> = ({ dbId, tableName }) => {
+    const [schema, setSchema] = useState<ApiColumnSchema[]>([]);
+    const [data, setData] = useState<any[]>([]); 
+    const [totalRows, setTotalRows] = useState<number>(0);
+    const [currentPage, setCurrentPage] = useState<number>(1);
+    const [pageSize, setPageSize] = useState<number>(20);
+    const [loadingSchema, setLoadingSchema] = useState<boolean>(false);
+    const [loadingData, setLoadingData] = useState<boolean>(false);
+    const [error, setError] = useState<string | null>(null);
 
-const [primaryKeyName, setPrimaryKeyName] = useState<string | null>(null);
+    const [primaryKeyName, setPrimaryKeyName] = useState<string | null>(null);
+    const [isPkAutoGenerated, setIsPkAutoGenerated] = useState<boolean>(false); 
 
-// --- Editing State ---
-const [editingKey, setEditingKey] = useState<string>('');
-const [editingRowData, setEditingRowData] = useState<EditingRowData>(null);
+    
+    const [editingKey, setEditingKey] = useState<string>('');
+    const [editingRowData, setEditingRowData] = useState<EditingRowData>(null);
 
-// --- Add Row State ---
-const [isAddModalVisible, setIsAddModalVisible] = useState<boolean>(false);
-const [addForm] = Form.useForm();
-const [confirmLoadingAdd, setConfirmLoadingAdd] = useState<boolean>(false);
+    
+    const [isAddModalVisible, setIsAddModalVisible] = useState<boolean>(false);
+    const [addForm] = Form.useForm();
+    const [confirmLoadingAdd, setConfirmLoadingAdd] = useState<boolean>(false);
 
-// --- Add Column State ---
-const [isAddColModalVisible, setIsAddColModalVisible] = useState<boolean>(false);
-const [addColForm] = Form.useForm();
-const [confirmLoadingAddCol, setConfirmLoadingAddCol] = useState<boolean>(false);
+    
+    const [isAddColModalVisible, setIsAddColModalVisible] = useState<boolean>(false);
+    const [addColForm] = Form.useForm();
+    const [confirmLoadingAddCol, setConfirmLoadingAddCol] = useState<boolean>(false);
 
-// --- Search State ---
-const [searchQuery, setSearchQuery] = useState<string>('');
+    
+    const [searchQuery, setSearchQuery] = useState<string>('');
 
-// --- Sort State ---
-// NOW used for FRONTEND sorting of the current page data
-const [sortConfig, setSortConfig] = useState<SortConfig>({ field: null, order: null });
+    
+    const [sortConfig, setSortConfig] = useState<SortConfig>({ field: null, order: null });
 
-const [refetchTrigger, setRefetchTrigger] = useState<number>(0);
+    const [refetchTrigger, setRefetchTrigger] = useState<number>(0); 
 
-// --- Filter State ---
-// NOTE: Backend filters remain unchanged.
-const [filterConfig, setFilterConfig] = useState<FilterCondition[]>([]);
-const [isFilterModalVisible, setIsFilterModalVisible] = useState(false);
-const [filterForm] = Form.useForm(); // Form instance for the filter modal
+    
+    const [filterConfig, setFilterConfig] = useState<FilterCondition[]>([]);
+    const [isFilterModalVisible, setIsFilterModalVisible] = useState(false);
+    const [filterForm] = Form.useForm(); 
 
-// --- Grouping State ---
-// NOTE: Backend grouping remains unchanged.
-const [groupingColumn, setGroupingColumn] = useState<string | null>(null);
+    
+    const [groupingColumn, setGroupingColumn] = useState<string | null>(null);
 
-// --- Upload State ---
-const [uploading, setUploading] = useState(false);
-const [isUploadModalVisible, setIsUploadModalVisible] = useState(false); // State for upload modal
+    
+    const [uploading, setUploading] = useState(false);
+    const [isUploadModalVisible, setIsUploadModalVisible] = useState(false); 
 
-// --- Debounced Search Handler (for Frontend Filtering) ---
-const debouncedSearch = useCallback(
-    debounce((query: string) => {
-    setSearchQuery(query);
-    }, 200), // Reduced delay for better responsiveness with frontend filtering
-    []
-);
+    
+    const debouncedSearch = useCallback(
+        debounce((query: string) => {
+            setSearchQuery(query);
+            
+        }, 300), 
+        []
+    );
 
-// --- Effect for Fetching Schema ---
-useEffect(() => {
-    if (!tableName) {
-    // Reset everything if no table is selected
-        setSchema([]); setData([]); setError(null); setPrimaryKeyName(null);
-        setEditingKey(''); setEditingRowData(null); setIsAddModalVisible(false);
-        setIsAddColModalVisible(false); addForm.resetFields(); addColForm.resetFields();
-        setCurrentPage(1); setTotalRows(0);
-        setSearchQuery(''); // Reset frontend search query
-        setSortConfig({ field: null, order: null }); // Reset frontend sort
-        setFilterConfig([]); filterForm.resetFields(); setGroupingColumn(null);
-        setIsUploadModalVisible(false); // Close upload modal if open
-        return;
-    }
-    // Reset state when table name changes
-    setLoadingSchema(true); setError(null); setSchema([]); setData([]);
-    setCurrentPage(1); setPrimaryKeyName(null); setEditingKey('');
-    setEditingRowData(null); setIsAddModalVisible(false); setIsAddColModalVisible(false);
-    addForm.resetFields(); addColForm.resetFields();
-    setSearchQuery(''); // Reset frontend search query
-    setSortConfig({ field: null, order: null }); // Reset frontend sort
-    setFilterConfig([]); filterForm.resetFields(); setGroupingColumn(null);
-    setIsUploadModalVisible(false); // Close upload modal if open
-
-    console.log(`Fetching schema for: ${tableName}`);
-    api.fetchSchema(tableName)
-    .then((fetchedSchema) => {
-    console.log("Schema fetched:", fetchedSchema);
-    if (!Array.isArray(fetchedSchema)) {
-        throw new Error("Invalid schema format received.");
-    }
-    setSchema(fetchedSchema);
-    const pk = fetchedSchema.find((col) => col.isPrimaryKey);
-    setPrimaryKeyName(pk ? pk.name : null);
-    if (!pk) {
-        console.warn(`Table "${tableName}" has no primary key in schema. Edit/Delete may fail.`);
-    }
-    })
-    .catch((err) => {
-    console.error(`Schema fetch error for ${tableName}:`, err);
-    setError(`Failed to load schema for "${tableName}": ${err.message}`);
-    setPrimaryKeyName(null); setSchema([]);
-    })
-    .finally(() => setLoadingSchema(false));
-
-}, [tableName, addForm, addColForm, filterForm]); // Dependencies for schema fetching
-
-// --- Effect for Fetching Data ---
-useEffect(() => {
-    // Don't fetch if schema is loading, or table name is missing, or schema is empty (and not due to an error)
-    if (!tableName || loadingSchema || (!loadingSchema && schema.length === 0 && !error)) {
-        if (!loadingSchema && schema.length === 0 && !error) {
-            setData([]);
-            setTotalRows(0);
+    
+    const generateRowKey = useCallback((row: any, index: number): string => {
+        if (primaryKeyName && row[primaryKeyName] !== undefined && row[primaryKeyName] !== null) {
+            
+            return `row-${dbId}-${tableName}-pk-${row[primaryKeyName]}`;
         }
-        return;
-    };
-
-    // Prevent data refetch while a row is being edited to avoid losing unsaved changes
-    if (editingKey) {
-        console.log("Data fetch skipped: Row editing in progress.");
-        return;
-    }
-
-    setLoadingData(true);
-    console.log(`Fetching data for: ${tableName}, Page: ${currentPage}, Size: ${pageSize}, Filter: ${filterConfig.length}, Group: ${groupingColumn}`);
-
-    // Prepare parameters for the API call - NO search or sort params here
-    const fetchParams: Record<string, any> = {
-        page: currentPage,
-        limit: pageSize,
-        // Send parameters only if they have values
-        ...(filterConfig.length > 0 && { filters: filterConfig }), // Backend filters still sent
-        ...(groupingColumn && { group_by: groupingColumn }),       // Backend grouping still sent
-    };
-
-    // Call the API
-    api.fetchData(tableName, fetchParams)
-    .then((response) => {
-        console.log("Data fetched (raw):", response);
-        if (!response || !Array.isArray(response.data) || typeof response.total !== 'number') {
-            throw new Error("Invalid data format received from server.");
-        }
-
-        // Process data for the table (add unique keys)
-        const processedData = response.data.map((row, index) => {
-            const pkValue = primaryKeyName ? row[primaryKeyName] : undefined;
-            // Generate a robust key using PK if available, otherwise use row index within the page
-            const key = pkValue !== undefined && pkValue !== null
-                ? `${tableName}-pk-${pkValue}`
-                : `row-${tableName}-${currentPage}-${pageSize}-${index}`; // Include page/size for better uniqueness
-            return { ...row, key };
-        });
-        console.log("Data processed for state:", processedData);
-        setData(processedData); // Store the raw data for the current page
-        setTotalRows(response.total);
-        if (error?.startsWith("Failed to load data")) setError(null); // Clear previous data loading errors on success
-    })
-    .catch((err) => {
-        console.error(`Data fetch error for ${tableName}:`, err);
-        setError(`Failed to load data for "${tableName}": ${err.message}`);
-        setData([]); setTotalRows(0); // Clear data on error
-    })
-    .finally(() => setLoadingData(false));
-
-// REMOVED searchQuery and sortConfig from dependencies - fetch is independent of them now
-}, [
-    tableName,
-    currentPage,
-    pageSize,
-    // searchQuery, // REMOVED: Search is frontend only
-    // sortConfig,  // REMOVED: Sort is frontend only
-    filterConfig,// Dependency: Refetch when backend filter changes
-    groupingColumn,// Dependency: Refetch when backend group changes
-    loadingSchema, // Dependency: Wait for schema to load
-    primaryKeyName,// Dependency: Needed for key generation
-    schema,        // Dependency: Ensure schema is loaded
-    error,         // Dependency: Avoid fetch loops if error occurs? (Maybe remove if error doesn't block subsequent tries)
-    editingKey,    // Dependency: Prevent fetch during edit
-    refetchTrigger // <-- ADD THIS DEPENDENCY
-]);
-
-// --- Frontend Data Processing (Search & Sort) ---
-const displayedData = useMemo(() => {
-    let filteredData = [...data]; // Start with the raw data fetched for the current page
-
-    // 1. Apply Frontend Search Filter
-    if (searchQuery) {
-        const lowerCaseQuery = searchQuery.toLowerCase();
-            filteredData = filteredData.filter(row =>
-            schema.some(col => {
-            const value = row[col.name];
-            // Check if any column value (converted to string) contains the search query
-            return value !== null && value !== undefined && String(value).toLowerCase().includes(lowerCaseQuery);
-            })
-        );
-    }
-
-    // 2. Apply Frontend Sorting
-    if (sortConfig.field && sortConfig.order) {
-            const { field, order } = sortConfig;
-            const sortField = String(field); // Ensure field is a string for indexing
-
-            filteredData.sort((a, b) => {
-            const valueA = a[sortField];
-            const valueB = b[sortField];
-
-            // Basic comparison logic (can be enhanced for specific types like dates if needed)
-            let comparison = 0;
-            if (valueA === null || valueA === undefined) comparison = -1;
-            else if (valueB === null || valueB === undefined) comparison = 1;
-            else if (valueA < valueB) comparison = -1;
-            else if (valueA > valueB) comparison = 1;
-
-            return order === 'descend' ? comparison * -1 : comparison;
-        });
-    }
-
-    return filteredData;
-}, [data, searchQuery, sortConfig, schema]); // Dependencies: raw data, search query, sort config, and schema (for search)
+        
+        return `row-${dbId}-${tableName}-page-${currentPage}-index-${index}`;
+   }, [dbId, tableName, primaryKeyName, currentPage]);
 
 
-// --- Table Change Handler (Handles Sorting via Table Header Clicks - FRONTEND) ---
-const handleTableChange = (
-    pagination: TablePaginationConfig, // Still ignored
-    filters: Record<string, (Key | boolean)[] | null>, // Still ignored
-    sorter: SorterResult<any> | SorterResult<any>[] // This contains the sort info
-    ) => {
-        // Prevent changes during editing
-        if (editingKey) {
-            message.warning('Please save or cancel edit first.');
+    
+    useEffect(() => {
+        if (!dbId || !tableName) {
+            
+            setSchema([]); setData([]); setError(null); setPrimaryKeyName(null); setIsPkAutoGenerated(false);
+            setEditingKey(''); setEditingRowData(null); setIsAddModalVisible(false); setIsAddColModalVisible(false);
+            addForm.resetFields(); addColForm.resetFields();
+            setCurrentPage(1); setPageSize(20); setTotalRows(0); 
+            setSearchQuery(''); 
+            setSortConfig({ field: null, order: null }); 
+            setFilterConfig([]); filterForm.resetFields(); setGroupingColumn(null); 
+            setIsUploadModalVisible(false); 
             return;
         }
-    console.log("Table change event (sorter for frontend):", sorter);
+        
+        setLoadingSchema(true); setError(null); setSchema([]); setData([]);
+        setCurrentPage(1); setPageSize(20); setTotalRows(0); 
+        setPrimaryKeyName(null); setIsPkAutoGenerated(false); setEditingKey('');
+        setEditingRowData(null); setIsAddModalVisible(false); setIsAddColModalVisible(false);
+        addForm.resetFields(); addColForm.resetFields();
+        setSearchQuery(''); 
+        setSortConfig({ field: null, order: null }); 
+        setFilterConfig([]); filterForm.resetFields(); setGroupingColumn(null); 
+        setIsUploadModalVisible(false); 
+        setRefetchTrigger(0); 
 
-    // AntD might pass an array for multi-sort, but we handle single sort
-    const currentSorter = Array.isArray(sorter) ? sorter[0] : sorter;
+        console.log(`DataGrid: Fetching schema for DB: ${dbId}, Table: ${tableName}`);
+        api.fetchSchema(dbId, tableName)
+            .then((fetchedSchema) => {
+                console.log("DataGrid: Schema fetched:", fetchedSchema);
+                if (!Array.isArray(fetchedSchema)) {
+                    throw new Error("Invalid schema format received.");
+                }
+                setSchema(fetchedSchema);
+                const pk = fetchedSchema.find((col) => col.isPrimaryKey);
+                setPrimaryKeyName(pk ? pk.name : null);
+                setIsPkAutoGenerated(pk ? Boolean(pk.isAutoGenerated) : false); 
+                if (!pk) {
+                    console.warn(`DataGrid: Table "${tableName}" in DB ${dbId} has no primary key. Edit/Delete operations might fail or be disabled.`);
+                    message.warning(`Table "${tableName}" has no primary key identified. Edit/Delete operations may be disabled or unstable.`, 5);
+                } else {
+                    console.info(`DataGrid: Primary key for DB ${dbId}, table "${tableName}" is "${pk.name}". Auto-generated: ${isPkAutoGenerated}`);
+                }
+            })
+            .catch((err) => {
+                console.error(`DataGrid: Schema fetch error for DB ${dbId}, Table ${tableName}:`, err);
+                setError(`Failed to load schema: ${err.message}`);
+                setPrimaryKeyName(null); setIsPkAutoGenerated(false); setSchema([]);
+            })
+            .finally(() => setLoadingSchema(false));
 
-    let newSortConfig: SortConfig = { field: null, order: null };
+    }, [dbId, tableName, addForm, addColForm, filterForm]); 
 
-    if (currentSorter && currentSorter.columnKey && currentSorter.order) {
-        newSortConfig = { field: currentSorter.columnKey, order: currentSorter.order };
-    }
-    if (newSortConfig.field !== sortConfig.field || newSortConfig.order !== sortConfig.order) {
-        console.log("Updating frontend sort config:", newSortConfig);
-        setSortConfig(newSortConfig);
-    }
-};
 
-// --- Helper Function: Render Appropriate Form Input Based on Schema Type ---
-const renderFormInput = (col: ApiColumnSchema, isFilterInput: boolean = false) => {
-const numericTypesLC = ['numeric', 'integer', 'int', 'bigint', 'float', 'double', 'decimal', 'real', 'serial', 'bigserial'];
-const dateTypesLC = ['date', 'timestamp', 'datetime', 'timestamptz'];
-const booleanTypesLC = ['boolean', 'bool'];
-const colTypeLC = col.type.toLowerCase().split('(')[0];
+    
+    useEffect(() => {
+        
+        if (!dbId || !tableName || loadingSchema || (!loadingSchema && schema.length === 0 && !error)) {
+             if (!loadingSchema && schema.length === 0 && !error && dbId && tableName) {
+                
+                 setData([]);
+                 setTotalRows(0);
+             }
+            return;
+        };
 
-if (numericTypesLC.includes(colTypeLC)) {
-    return <InputNumber style={{ width: '100%' }} placeholder={"Enter number"} />;
-}
-else if (dateTypesLC.includes(colTypeLC)) {
-    const showTime = colTypeLC.includes('timestamp') || colTypeLC.includes('datetime');
-    return <DatePicker style={{ width: '100%' }} showTime={showTime} placeholder={`Select date${showTime ? '/time' : ''}`} format={showTime ? "YYYY-MM-DD HH:mm:ss" : "YYYY-MM-DD"} />;
-} else if (booleanTypesLC.includes(colTypeLC)) {
-    return <Select style={{ width: '100%' }} placeholder="Select True/False/Null" allowClear={isFilterInput} >
-    <Option value={true}>True</Option>
-    <Option value={false}>False</Option>
-    {isFilterInput && <Option value={null}>Null</Option>} {/* Allow explicit Null selection in filters */}
-    </Select>;
-}
-else {
-    return <Input placeholder={"Enter text"} />;
-}
-};
+        
+        if (editingKey) {
+            console.log("Data fetch skipped: Row editing in progress.");
+            return;
+        }
 
-// --- Helper Function: Render Filter Value Input ---
-const renderFilterValueInput = (columnIndex?: number) => {
-    if (columnIndex === undefined) return <Input disabled placeholder="Select column first" />;
+        setLoadingData(true);
+        console.log(`DataGrid: Fetching data for DB: ${dbId}, Table: ${tableName}, Page: ${currentPage}, Size: ${pageSize}, Filters: ${filterConfig.length}, GroupBy: ${groupingColumn}`);
 
-    const field = filterForm.getFieldValue(['conditions', columnIndex, 'column']);
-    const operator = filterForm.getFieldValue(['conditions', columnIndex, 'operator']);
-    const selectedColumn = schema.find(col => col.name === field);
+        
+        const fetchParams: FetchParams = {
+            page: currentPage,
+            limit: pageSize,
+            
+            ...(filterConfig.length > 0 && { filters: filterConfig }),
+            ...(groupingColumn && { group_by: groupingColumn }),
+        };
 
-    if (operator === 'IS NULL' || operator === 'IS NOT NULL') {
-        return <Input disabled placeholder="No value needed" style={{ width: 200 }}/>;
-    }
+        
+        api.fetchData(dbId, tableName, fetchParams)
+            .then((response) => {
+                console.log("table:", tableName);
+                console.log("DataGrid: Data fetched (raw):", response);
+                if (!response || !Array.isArray(response.data) || typeof response.total !== 'number') {
+                    throw new Error("Invalid data format received from server.");
+                }
 
-    if (!selectedColumn) return <Input disabled placeholder="Select column first" style={{ width: 200 }}/>;
+                
+                const processedData = response.data.map((row, index) => ({
+                     ...row,
+                     key: generateRowKey(row, index)
+                }));
+                console.log("DataGrid: Data processed for state:", processedData);
+                setData(processedData); 
+                setTotalRows(response.total);
+                
+                if (error?.startsWith("Failed to load data")) setError(null);
+            })
+            .catch((err) => {
+                console.error(`DataGrid: Data fetch error for DB ${dbId}, Table ${tableName}:`, err);
+                setError(`Failed to load data: ${err.message}`);
+                setData([]); setTotalRows(0); 
+            })
+            .finally(() => setLoadingData(false));
 
-    const InputComponent = renderFormInput(selectedColumn, true);
-    return React.cloneElement(InputComponent, { style: { ...InputComponent.props.style, width: 200 } });
-};
+    
+    }, [
+        dbId,
+        tableName,
+        currentPage,
+        pageSize,
+        filterConfig,   
+        groupingColumn, 
+        loadingSchema,  
+        schema,         
+        error,          
+        editingKey,     
+        refetchTrigger, 
+        generateRowKey  
+    ]);
 
-// --- Helper Function: Prepare Payload with Type Conversion ---
-const preparePayload = (
-    inputValues: Record<string, any>,
-    schemaRef: ApiColumnSchema[],
-    isInsert: boolean = false,
-    pkName: string | null
+
+    
+    const displayedData = useMemo(() => {
+        let filteredData = [...data]; 
+
+        
+        if (searchQuery && schema.length > 0) { 
+            const lowerCaseQuery = searchQuery.toLowerCase();
+            filteredData = filteredData.filter(row =>
+                schema.some(col => {
+                    const value = row[col.name];
+                    
+                    return value !== null && value !== undefined && String(value).toLowerCase().includes(lowerCaseQuery);
+                })
+            );
+        }
+
+        
+        if (sortConfig.field && sortConfig.order && schema.length > 0) { 
+            const { field, order } = sortConfig;
+            const sortField = String(field); 
+
+            
+            
+            
+
+            filteredData.sort((a, b) => {
+                const valueA = a[sortField];
+                const valueB = b[sortField];
+
+                
+                let comparison = 0;
+                if (valueA === null || valueA === undefined) comparison = (valueB === null || valueB === undefined) ? 0 : -1; 
+                else if (valueB === null || valueB === undefined) comparison = 1;
+                // Potential numeric sort improvement:
+                // else if (sortType && ['int', 'num', 'dec', 'float', 'real'].some(t => sortType.includes(t))) {
+                //    comparison = Number(valueA) - Number(valueB);
+                // }
+                else if (valueA < valueB) comparison = -1;
+                else if (valueA > valueB) comparison = 1;
+
+                return order === 'descend' ? comparison * -1 : comparison;
+            });
+        }
+
+        return filteredData;
+    }, [data, searchQuery, sortConfig, schema]); 
+
+
+    
+    const handleTableChange = (
+        pagination: TablePaginationConfig, 
+        filters: Record<string, (Key | boolean)[] | null>, 
+        sorter: SorterResult<any> | SorterResult<any>[] 
+        ) => {
+            
+            if (editingKey) {
+                message.warning('Please save or cancel edit first.');
+                return;
+            }
+        console.log("DataGrid: Table change event (sorter for frontend):", sorter);
+
+        
+        const currentSorter = Array.isArray(sorter) ? sorter[0] : sorter;
+
+        let newSortConfig: SortConfig = { field: null, order: null };
+
+        if (currentSorter && currentSorter.columnKey && currentSorter.order) {
+            
+            newSortConfig = { field: currentSorter.columnKey, order: currentSorter.order };
+        }
+
+        
+        if (newSortConfig.field !== sortConfig.field || newSortConfig.order !== sortConfig.order) {
+            console.log("DataGrid: Updating frontend sort config:", newSortConfig);
+            setSortConfig(newSortConfig);
+            
+        }
+    };
+
+    
+    const renderFormInput = (col: ApiColumnSchema, isFilterInput: boolean = false) => {
+        const numericTypesLC = ['numeric', 'integer', 'int', 'bigint', 'smallint', 'float', 'double', 'decimal', 'real', 'serial', 'bigserial'];
+        const dateTypesLC = ['date', 'timestamp', 'datetime', 'timestamptz', 'timestamp with time zone'];
+        const booleanTypesLC = ['boolean', 'bool'];
+        
+        const colTypeLC = col.type.toLowerCase().split('(')[0].split(' ')[0];
+
+        if (numericTypesLC.includes(colTypeLC)) {
+            return <InputNumber style={{ width: '100%' }} placeholder={"Enter number"} />;
+        } else if (dateTypesLC.includes(colTypeLC)) {
+            const showTime = colTypeLC.includes('timestamp') || colTypeLC.includes('datetime');
+            return <DatePicker style={{ width: '100%' }} showTime={showTime} placeholder={`Select date${showTime ? '/time' : ''}`} format={showTime ? "YYYY-MM-DD HH:mm:ss" : "YYYY-MM-DD"} />;
+        } else if (booleanTypesLC.includes(colTypeLC)) {
+            
+            
+            return (
+                <Select style={{ width: '100%' }} placeholder="Select True/False/Null" allowClear={isFilterInput} >
+                    <Option value={true}>True</Option>
+                    <Option value={false}>False</Option>
+                    {isFilterInput && <Option value={null}>Null</Option>} {/* Only show Null option in filter context */}
+                </Select>
+            );
+        }
+        
+        else {
+            return <Input placeholder={"Enter text"} />;
+        }
+    };
+
+    
+    const renderFilterValueInput = (columnIndex?: number) => {
+        if (columnIndex === undefined) return <Input disabled placeholder="Select column first" />;
+
+        const field = filterForm.getFieldValue(['conditions', columnIndex, 'column']);
+        const operator = filterForm.getFieldValue(['conditions', columnIndex, 'operator']);
+        const selectedColumn = schema.find(col => col.name === field);
+
+        if (operator === 'IS NULL' || operator === 'IS NOT NULL') {
+            return <Input disabled placeholder="No value needed" style={{ width: 200 }}/>;
+        }
+
+        if (!selectedColumn) return <Input disabled placeholder="Select column first" style={{ width: 200 }}/>;
+
+        
+        const InputComponent = renderFormInput(selectedColumn, true);
+        
+        return React.cloneElement(InputComponent, { style: { ...InputComponent.props.style, width: 200 } });
+    };
+
+
+    
+    const preparePayload = (
+        inputValues: Record<string, any>,
+        schemaRef: ApiColumnSchema[],
+        isInsert: boolean = false,
+        pkName: string | null,
+        pkIsAutoGenerated: boolean 
     ): Record<string, any> | null => {
         const payload: Record<string, any> = {};
         let parsingError = false;
         let errors: string[] = [];
 
         schemaRef.forEach(col => {
-            if (col.isPrimaryKey || col.name === pkName) {
-            return; // Skip primary key from payload
+            
+            if ((isInsert && col.name === pkName && pkIsAutoGenerated) || (!isInsert && col.name === pkName)) {
+                console.log(`Payload Prep: Skipping PK "${col.name}" (isInsert: ${isInsert}, isAutoGenerated: ${pkIsAutoGenerated})`);
+               return;
             }
 
+            
             if (inputValues.hasOwnProperty(col.name)) {
                 const rawValue = inputValues[col.name];
-                const colTypeLC = col.type.toLowerCase().split('(')[0];
-                const numericTypesLC = ['numeric', 'integer', 'int', 'bigint', 'float', 'double', 'decimal', 'real'];
-                const dateTypesLC = ['date', 'timestamp', 'datetime', 'timestamptz'];
+                 
+                const colTypeLC = col.type.toLowerCase().split('(')[0].split(' ')[0];
+                const numericTypesLC = ['numeric', 'integer', 'int', 'bigint', 'smallint', 'float', 'double', 'decimal', 'real'];
+                const dateTypesLC = ['date', 'timestamp', 'datetime', 'timestamptz']; 
                 const booleanTypesLC = ['boolean', 'bool'];
 
-            if (rawValue === '' || rawValue === null || rawValue === undefined) {
-                if (!col.isNullable && isInsert && !col.hasDefault) { // Stricter check for insert
-                    errors.push(`Column "${col.name}" cannot be empty.`);
-                    parsingError = true;
-                } else {
-                    payload[col.name] = null; // Allow sending null if nullable or for update
+                
+                if (rawValue === '' || rawValue === null || rawValue === undefined) {
+                    
+                    
+                    
+                    if (!col.isNullable && isInsert && !col.hasDefault && !(col.isPrimaryKey && pkIsAutoGenerated)) {
+                        errors.push(`Column "${col.name}" cannot be empty (required).`);
+                        parsingError = true;
+                    } else if (!col.isNullable && !isInsert) {
+                        
+                        
+                        
+                        console.warn(`Payload Prep: Setting non-nullable column "${col.name}" to null during update.`);
+                        payload[col.name] = null;
+                    }
+                    else {
+                         payload[col.name] = null; 
+                    }
                 }
-            }
-            else if (numericTypesLC.includes(colTypeLC)) {
-                const numValue = typeof rawValue === 'number' ? rawValue : parseFloat(String(rawValue).replace(/,/g, ''));
-                if (isNaN(numValue)) {
-                    errors.push(`Invalid number format for "${col.name}": ${rawValue}`);
-                    parsingError = true;
-                } else { payload[col.name] = numValue; }
-            } else if (dateTypesLC.includes(colTypeLC)) {
-                if (dayjs.isDayjs(rawValue)) { // Expecting dayjs object from DatePicker
-                    payload[col.name] = rawValue.toISOString();
-                } else if (typeof rawValue === 'string') { // Handle pre-formatted strings (e.g., during edit)
-                    try {
+                
+                else if (numericTypesLC.includes(colTypeLC)) {
+                    
+                    const numValue = Number(String(rawValue).replace(/,/g, '')); 
+                    if (isNaN(numValue)) {
+                        errors.push(`Invalid number format for "${col.name}": ${rawValue}`);
+                        parsingError = true;
+                    } else { payload[col.name] = numValue; }
+                }
+                
+                else if (dateTypesLC.includes(colTypeLC)) {
+                    if (dayjs.isDayjs(rawValue)) { 
+                        if (rawValue.isValid()) {
+                             payload[col.name] = rawValue.toISOString(); 
+                        } else {
+                             errors.push(`Invalid date value provided for "${col.name}".`);
+                             parsingError = true;
+                        }
+                    } else if (typeof rawValue === 'string') { 
                         const parsedDate = dayjs(rawValue);
                         if (parsedDate.isValid()) {
                             payload[col.name] = parsedDate.toISOString();
-                        } else { throw new Error("Invalid date string"); }
-                    } catch {
-                        errors.push(`Invalid date string for "${col.name}": ${rawValue}`);
-                        parsingError = true;
-                    }
-                } else if (rawValue instanceof Date) { // Handle native Date object just in case
-                    payload[col.name] = rawValue.toISOString();
-                } else {
-                    errors.push(`Invalid date input for "${col.name}"`);
-                    parsingError = true;
-                }
-            } else if (booleanTypesLC.includes(colTypeLC)) {
-                if (rawValue === true || rawValue === false) {
-                    payload[col.name] = rawValue;
-                } else if (rawValue === null || rawValue === undefined) { // Checkbox might return undefined if unchecked initially?
-                    if (!col.isNullable && isInsert && !col.hasDefault) {
-                        errors.push(`Boolean column "${col.name}" cannot be empty.`);
-                        parsingError = true;
+                        } else {
+                            errors.push(`Invalid date string format for "${col.name}": ${rawValue}`);
+                            parsingError = true;
+                        }
+                    } else if (rawValue instanceof Date) { 
+                        payload[col.name] = rawValue.toISOString();
                     } else {
-                        payload[col.name] = null;
+                        errors.push(`Invalid date input type for "${col.name}"`);
+                        parsingError = true;
                     }
-                } else {
-                    errors.push(`Invalid boolean value for "${col.name}": ${rawValue}`);
-                    parsingError = true;
                 }
-            } else { // Text types
-                payload[col.name] = String(rawValue);
-            }
-            } else if (isInsert && !col.isNullable && !col.hasDefault && !col.isPrimaryKey) {
+                
+                else if (booleanTypesLC.includes(colTypeLC)) {
+                    if (rawValue === true || String(rawValue).toLowerCase() === 'true') {
+                        payload[col.name] = true;
+                    } else if (rawValue === false || String(rawValue).toLowerCase() === 'false') {
+                        payload[col.name] = false;
+                    } else {
+                        
+                        if (!col.isNullable && isInsert && !col.hasDefault && !(col.isPrimaryKey && pkIsAutoGenerated)) {
+                            errors.push(`Boolean column "${col.name}" cannot be empty (required).`);
+                            parsingError = true;
+                        } else {
+                             payload[col.name] = null; 
+                             if (!col.isNullable) {
+                                 console.warn(`Payload Prep: Setting non-nullable boolean column "${col.name}" to null during update.`);
+                             }
+                        }
+                    }
+                }
+                
+                else {
+                    
+                     payload[col.name] = String(rawValue);
+                }
+            } else if (isInsert && !col.isNullable && !col.hasDefault && !(col.isPrimaryKey && pkIsAutoGenerated)) {
+                
                 errors.push(`Column "${col.name}" is required.`);
                 parsingError = true;
             }
         });
 
         if (parsingError) {
-        message.error(`Please fix validation errors: ${errors.join('; ')}`);
-        console.error("Payload parsing failed.", errors, inputValues);
-        return null;
+            message.error(`Please fix validation errors: ${errors.join('; ')}`);
+            console.error("DataGrid: Payload preparation failed.", errors, inputValues);
+            return null;
         }
-        console.log("Prepared Payload:", payload);
+        console.log("DataGrid: Prepared Payload:", payload);
         return payload;
-        };
-
-        // --- Add Row Handlers ---
-        const showAddModal = () => { addForm.resetFields(); setIsAddModalVisible(true); };
-        const handleAddOk = async () => {
-            if (!tableName) return;
-            try {
-                setConfirmLoadingAdd(true); // Use modal's loading state
-                const values = await addForm.validateFields();
-                const payload = preparePayload(values, schema, true, primaryKeyName);
-
-                if (!payload) { setConfirmLoadingAdd(false); return; }
-
-                console.log("📦 Sending Create Payload:", payload);
-                await api.createRecord(tableName, payload);
-                message.success('Record added successfully!');
-                setIsAddModalVisible(false);
-
-                // Refetch data logic: Always go to page 1 after adding.
-                const wasAlreadyOnPage1 = currentPage === 1;
-
-                if (!wasAlreadyOnPage1) {
-                    // If not on page 1, setting it will trigger useEffect
-                    console.log("Setting current page to 1 after add.");
-                    setCurrentPage(1);
-                } else {
-                    // If already on page 1, force refetch using the trigger state
-                    console.log("Forcing refetch on page 1 after add via trigger.");
-                    setRefetchTrigger(c => c + 1);
-                }
-                // Loading state for the *data grid* will be handled by the triggered useEffect
-
-            } catch (errorInfo: any) {
-                console.error('Add Row Failed:', errorInfo);
-                const errorMsg = errorInfo?.response?.data?.message || (errorInfo instanceof Error ? errorInfo.message : null) || 'Unknown error';
-                if (errorInfo.errorFields) { message.error('Validation failed. Check the form.'); }
-                else { message.error(`Failed to add record: ${errorMsg}`); }
-            } finally {
-                setConfirmLoadingAdd(false); // Stop modal's loading indicator
-            }
-        };
-        // handleAddCancel remains the same
-        const handleAddCancel = () => { setIsAddModalVisible(false); };
-        // --- Edit Handlers ---
-        const isEditing = (record: any) => record.key === editingKey;
-        const handleEdit = (record: any) => {
-            console.log("Editing record:", record);
-            const initialEditData = { ...record };
-            schema.forEach(col => {
-                const dateTypesLC = ['date', 'timestamp', 'datetime', 'timestamptz'];
-                const colTypeLC = col.type.toLowerCase().split('(')[0];
-                if (dateTypesLC.includes(colTypeLC) && initialEditData[col.name]) {
-                    const parsedDate = dayjs(initialEditData[col.name]);
-                    if (parsedDate.isValid()) {
-                        initialEditData[col.name] = parsedDate; // Use dayjs object for DatePicker
-                    } else {
-                        console.warn(`Could not parse date string "${initialEditData[col.name]}" for column "${col.name}" during edit.`);
-                    initialEditData[col.name] = null; // Or set to null/undefined if parsing fails
-                    }
-                }
-            });
-            setEditingRowData(initialEditData);
-            setEditingKey(record.key);
     };
-    const handleCancel = () => { setEditingKey(''); setEditingRowData(null); };
-    const handleSave = async () => {
-        if (!tableName || !primaryKeyName || !editingRowData) return;
 
-        const keyToSave = editingKey;
-        // Find original record in the RAW data, not displayedData
-        const originalRecord = data.find(item => item.key === keyToSave);
-        if (!originalRecord) {
-            message.error("Cannot save row: Original record not found in current page data.");
+
+    
+    const showAddModal = () => { addForm.resetFields(); setIsAddModalVisible(true); };
+    const handleAddCancel = () => { setIsAddModalVisible(false); };
+    const handleAddOk = async () => {
+        if (!dbId || !tableName) return;
+        try {
+            setConfirmLoadingAdd(true);
+            const values = await addForm.validateFields();
+
+            
+            const payload = preparePayload(values, schema, true, primaryKeyName, isPkAutoGenerated);
+            if (!payload) { setConfirmLoadingAdd(false); return; }
+
+            console.log("DataGrid: 📦 Sending Create Payload:", payload);
+            await api.createRecord(dbId, tableName, payload);
+            message.success('Record added successfully!');
+            setIsAddModalVisible(false);
+
+            
+            const wasAlreadyOnPage1 = currentPage === 1;
+            const isSortedOrFiltered = sortConfig.field || searchQuery || filterConfig.length > 0 || groupingColumn;
+
+            if (!wasAlreadyOnPage1 || isSortedOrFiltered) {
+                
+                
+                console.log("Setting current page to 1 after add.");
+                setCurrentPage(1);
+                
+                
+                
+            } else {
+                // If already on page 1 and no filters/sorts, force refetch of current page using trigger.
+                console.log("Forcing refetch on page 1 after add via trigger.");
+                setRefetchTrigger(c => c + 1);
+            }
+            // Loading state for the data grid will be handled by the triggered useEffect
+
+        } catch (errorInfo: any) {
+            console.error('DataGrid: Add Row Failed:', errorInfo);
+            const errorMsg = errorInfo?.response?.data?.error
+                            || errorInfo?.response?.data?.message
+                            || (errorInfo instanceof Error ? errorInfo.message : null)
+                            || 'Unknown error';
+            if (errorInfo.errorFields) { message.error('Validation failed. Check the form fields.'); }
+            else { message.error(`Failed to add record: ${errorMsg}`); }
+        } finally {
+            setConfirmLoadingAdd(false);
+        }
+    };
+
+
+    // --- Edit Handlers ---
+    const isEditing = (record: any) => record.key === editingKey;
+
+    const handleEdit = (record: any) => {
+        if (!primaryKeyName && record.key.includes('-pk-')) {
+             // Try to infer PK name from the key if schema failed but key was generated using PK
+             try {
+                 const parts = record.key.split('-pk-');
+                 const pkValue = parts[1];
+                 const inferredPkName = Object.keys(record).find(k => String(record[k]) === pkValue && k !== 'key');
+                 if (inferredPkName) {
+                      console.warn(`PK name was null, inferring "${inferredPkName}" from row key.`);
+                      // setPrimaryKeyName(inferredPkName); // This might cause issues if schema updates later
+                      message.warn(`Primary Key was not identified in schema, attempting edit based on inferred key "${inferredPkName}". Use with caution.`);
+                 } else {
+                      message.error("Cannot edit: Primary Key missing and could not be inferred from row key.");
+                      return;
+                 }
+             } catch {
+                 message.error("Cannot edit: Primary Key missing and could not be inferred from row key.");
+                 return;
+             }
+        } else if (!primaryKeyName) {
+            message.error("Cannot edit: Primary Key information missing.");
+             return;
+        }
+
+        console.log("DataGrid: Editing record:", record);
+        const initialEditData = { ...record };
+
+        // Convert date strings to dayjs objects for DatePicker compatibility (CodeA logic)
+        schema.forEach(col => {
+            const dateTypesLC = ['date', 'timestamp', 'datetime', 'timestamptz', 'timestamp with time zone'];
+             // Extract base type before parenthesis or space
+            const colTypeLC = col.type.toLowerCase().split('(')[0].split(' ')[0];
+
+            if (dateTypesLC.includes(colTypeLC) && initialEditData[col.name]) {
+                const parsedDate = dayjs(initialEditData[col.name]); // Use dayjs directly
+                if (parsedDate.isValid()) {
+                    initialEditData[col.name] = parsedDate; // Store dayjs object in edit state
+                } else {
+                    console.warn(`Could not parse date string "${initialEditData[col.name]}" for column "${col.name}" during edit start.`);
+                    initialEditData[col.name] = null; // Set to null if parsing fails to avoid invalid date in picker
+                }
+            }
+        });
+
+        setEditingRowData(initialEditData);
+        setEditingKey(record.key);
+    };
+
+    const handleCancel = () => { setEditingKey(''); setEditingRowData(null); };
+
+    const handleSave = async () => {
+        if (!dbId || !tableName || !editingKey || !editingRowData) {
+            console.error("Save aborted: Missing dbId, tableName, editingKey, or editingRowData.");
             return;
         }
-        const pkValue = originalRecord[primaryKeyName];
+
+        // Find the original record in the *raw* data state to get the PK
+        // Note: generateRowKey might use index if PK is null, so finding by key is crucial
+        const originalRecord = data.find(item => item.key === editingKey);
+
+        if (!originalRecord) {
+             message.error("Cannot save row: Original record not found in current page data. Please Cancel and try again.");
+             console.error("Original record with key", editingKey, "not found in data:", data);
+             // Consider cancelling edit state here?
+             // handleCancel();
+             return;
+         }
+
+        // Try to get PK Name again if it was null initially but inferred during handleEdit
+        const currentPkName = primaryKeyName || Object.keys(originalRecord).find(k => k !== 'key' && `row-${dbId}-${tableName}-pk-${originalRecord[k]}` === editingKey);
+
+         if (!currentPkName) {
+             message.error("Cannot save row: Primary key name could not be determined.");
+             return;
+         }
+         const pkValue = originalRecord[currentPkName];
+
 
         if (pkValue === undefined || pkValue === null) {
-            message.error("Cannot save row: Primary key value is missing.");
+            message.error(`Cannot save row: Primary key ("${currentPkName}") value is missing in original data.`);
             return;
         }
 
+        // Use editingRowData which contains the latest input values
         const dataToSave = { ...editingRowData };
-        delete dataToSave.key;
+        delete dataToSave.key; // Remove the temporary React key
 
-        const payload = preparePayload(dataToSave, schema, false, primaryKeyName);
-        if (!payload) { return; }
+        // Use merged preparePayload, passing isInsert=false and pk details
+        const payload = preparePayload(dataToSave, schema, false, currentPkName, isPkAutoGenerated);
+        if (!payload) { return; } // preparePayload shows error message
 
-        // Simple change detection (more robust deep comparison might be needed)
+        // Optional: Simple change detection (CodeA logic, enhanced for dayjs)
         let changed = false;
         for (const key in payload) {
-            const originalValue = originalRecord[key];
-            const newValue = payload[key];
-            const dateTypesLC = ['date', 'timestamp', 'datetime', 'timestamptz'];
-            const col = schema.find(c => c.name === key);
-            const colTypeLC = col?.type.toLowerCase().split('(')[0] || '';
+            if (payload.hasOwnProperty(key)) {
+                const originalValue = originalRecord[key];
+                const newValue = payload[key]; // This will be ISO string for dates from preparePayload
+                const col = schema.find(c => c.name === key);
+                const colTypeLC = col?.type.toLowerCase().split('(')[0].split(' ')[0] || '';
+                const dateTypesLC = ['date', 'timestamp', 'datetime', 'timestamptz'];
 
-            if (dateTypesLC.includes(colTypeLC)) {
-                // Compare ISO strings for dates coming from payload
-                const originalDateStr = originalValue ? dayjs(originalValue).toISOString() : null;
-                if (originalDateStr !== newValue) { changed = true; break; }
-            } else { // Handle null/undefined comparison carefully
-                if ((originalValue === null || originalValue === undefined) && (newValue === null || newValue === undefined)) {
-                    continue; // Both are null/undefined, no change
-                }
-                // Use string comparison as a fallback, might need refinement for numeric types
-                if (String(originalValue) !== String(newValue)) {
-                    changed = true;
-                    break;
+                if (dateTypesLC.includes(colTypeLC)) {
+                    // Compare ISO strings for dates
+                    const originalDateStr = originalValue ? dayjs(originalValue).toISOString() : null;
+                     // Also handle case where original was null/undefined
+                    const newDateStr = newValue ? String(newValue) : null; // newValue should be ISO string or null
+                    if (originalDateStr !== newDateStr) {
+                        console.log(`Change detected (Date): ${key}: ${originalDateStr} -> ${newDateStr}`);
+                        changed = true; break;
+                    }
+                } else {
+                    // Careful comparison for null/undefined vs other types
+                    if ((originalValue === null || originalValue === undefined) && (newValue === null || newValue === undefined)) {
+                        continue; // Both are nullish, no change
+                    }
+                    // Use string comparison as a general fallback, might need refinement for numbers if precision matters
+                    if (String(originalValue) !== String(newValue)) {
+                         console.log(`Change detected (Other): ${key}: ${originalValue} (Type: ${typeof originalValue}) -> ${newValue} (Type: ${typeof newValue})`);
+                        changed = true; break;
+                    }
                 }
             }
         }
 
         if (!changed && Object.keys(payload).length > 0) {
-            console.log("Payload generated, but simple change check shows no difference. Proceeding with save.");
-        } else if (Object.keys(payload).length === 0) {
-            message.info("No changes detected to save.");
-            handleCancel();
-            return;
-        }
+             message.info("No changes detected to save.");
+             handleCancel();
+             return;
+         } else if (Object.keys(payload).length === 0 && !changed) {
+             // This case might happen if only the PK was in editingRowData initially and got skipped by preparePayload
+             message.info("No editable fields modified.");
+             handleCancel();
+             return;
+         }
 
+
+        const messageKey = `update-${editingKey}`;
         try {
-            setLoadingData(true); // Use general data loading for now
-            console.log("📦 Sending Update Payload:", payload);
-            await api.updateRecord(tableName, pkValue, payload);
+            // Show saving indicator (using general loadingData state or specific one if preferred)
+             setLoadingData(true); // Indicate activity
+             message.loading({ content: "Saving...", key: messageKey, duration: 0 });
+            console.log("DataGrid: 📦 Sending Update Payload:", payload, `for PK ${currentPkName}=${pkValue}`);
+
+            // API call (CodeB style - waits for response)
+            const updatedRowFromServer = await api.updateRecord(dbId, tableName, pkValue, payload);
+            console.log("DataGrid: Received updated row from server:", updatedRowFromServer);
+
+            // Update local state with the data *returned* from the server for consistency
             setData((prevData) => {
-                const index = prevData.findIndex(item => item.key === keyToSave);
-                if (index === -1) return prevData; // Should not happen if originalRecord was found
+                const index = prevData.findIndex(item => item.key === editingKey);
+                if (index === -1) {
+                    console.warn("Edited record key not found in data after save, returning previous data.");
+                    return prevData;
+                }
                 const newData = [...prevData];
-                const updatedRecord = { ...originalRecord, ...payload, key: keyToSave };
-                schema.forEach(col => {
-                    if (payload.hasOwnProperty(col.name)) {
-                        updatedRecord[col.name] = payload[col.name];
-                    }
-                });
-                newData[index] = updatedRecord;
-                console.log("Optimistically updated raw data state:", newData[index]);
+                 // Important: Merge server response with the existing record, preserving the key
+                newData[index] = { ...originalRecord, ...updatedRowFromServer, key: editingKey };
+                console.log("DataGrid: Updated local data state with server response:", newData[index]);
                 return newData;
             });
-            message.success('Record updated successfully!');
-            setEditingKey(''); setEditingRowData(null);
+
+            message.success({ content: 'Record updated successfully!', key: messageKey, duration: 2 });
+            handleCancel(); // Exit editing mode on success
+
         } catch (err: any) {
-            console.error('Update Row Failed:', err);
-            const errorMsg = err.response?.data?.message || err.message || 'Unknown error';
-            setError(`Failed to update record: ${errorMsg}`);
-            message.error(`Failed to update record: ${errorMsg}`);
-            // Keep editing state on failure
+            console.error('DataGrid: Update Row Failed:', err);
+            const errorMsg = err.response?.data?.error || err.response?.data?.message || err.message || 'Unknown error';
+            // Keep editing state on failure so user can retry or cancel
+            // setError(`Update Failed: ${errorMsg}`); // Set error state if needed
+            message.error({ content: `Failed to update record: ${errorMsg}`, key: messageKey, duration: 4 });
         } finally {
-            setLoadingData(false); // Stop loading indicator
+             setLoadingData(false); // Stop general loading indicator
+             message.destroy(messageKey); // Ensure loading message is removed
         }
     };
+
     const handleEditingInputChange = (value: any, dataIndex: string ) => {
         if (!editingRowData) return;
         console.log(`Input change: ${dataIndex} =`, value);
-        if (typeof value === 'object' && value?.target?.type === 'checkbox') {
-            value = value.target.checked;
+
+        // Standardize input: handle event objects vs direct values
+        let processedValue = value;
+        if (value && value.target) { // Check if it's an event object
+            processedValue = value.target.type === 'checkbox' ? value.target.checked : value.target.value;
         }
-        const colSchema = schema.find(col => col.name === dataIndex);
-        const dateTypesLC = ['date', 'timestamp', 'datetime', 'timestamptz'];
-        if (colSchema && dateTypesLC.includes(colSchema.type.toLowerCase().split('(')[0])) {
-            if (dayjs.isDayjs(value) || value === null) {
-                setEditingRowData(prev => ({ ...prev, [dataIndex]: value }));
-            } else {
-                console.warn("Non-dayjs value received for date field:", value);
-                const parsed = dayjs(value);
-                setEditingRowData(prev => ({ ...prev, [dataIndex]: parsed.isValid() ? parsed : null }));
-            }
-        } else {
-            setEditingRowData(prev => ({ ...prev, [dataIndex]: value }));
-        }
+         // Special handling for Dayjs objects (keep them as Dayjs in state)
+         else if (dayjs.isDayjs(value)) {
+              processedValue = value; // Keep the Dayjs object
+         }
+         // Handle null from DatePicker clear
+         else if (value === null) {
+             const colSchema = schema.find(col => col.name === dataIndex);
+             const dateTypesLC = ['date', 'timestamp', 'datetime', 'timestamptz', 'timestamp with time zone'];
+             const colTypeLC = colSchema?.type.toLowerCase().split('(')[0].split(' ')[0];
+             if (colSchema && dateTypesLC.includes(colTypeLC || '')) {
+                 processedValue = null; // Explicitly set null for cleared dates
+             }
+         }
+
+
+        console.log(`Processed input change: ${dataIndex} =`, processedValue);
+        setEditingRowData(prev => ({ ...prev, [dataIndex]: processedValue }));
     };
 
+
     // --- Delete Handler ---
-    const handleDelete = (primaryKeyValue: string | number) => {
-        if (!tableName || !primaryKeyName) {
-            message.error("Cannot delete row: Table or Primary Key information missing."); return;
-        }
-        const displayValue = String(primaryKeyValue);
+    const handleDelete = (recordToDelete: any) => {
+         if (!dbId || !tableName) {
+             message.error("Cannot delete row: Database or Table context missing.");
+             return;
+         }
+
+         // Try to determine PK Name and Value robustly
+         const currentPkName = primaryKeyName || Object.keys(recordToDelete).find(k => k !== 'key' && `row-${dbId}-${tableName}-pk-${recordToDelete[k]}` === recordToDelete.key);
+
+         if (!currentPkName) {
+             message.error("Cannot delete row: Primary key name could not be determined.");
+             return;
+         }
+         const primaryKeyValue = recordToDelete[currentPkName];
+
+          if (primaryKeyValue === undefined || primaryKeyValue === null) {
+             message.error(`Cannot delete row: Primary key ("${currentPkName}") value is missing.`);
+             return;
+         }
+         const displayValue = String(primaryKeyValue);
 
         confirm({
             title: 'Are you sure delete this record?',
-            content: `Record with ${primaryKeyName}=${displayValue} will be permanently deleted.`,
+            content: `Record with ${currentPkName}=${displayValue} will be permanently deleted.`,
             okText: 'Yes, Delete', okType: 'danger', cancelText: 'No', maskClosable: false,
             onOk: async () => {
-                const messageKey = `delete-${primaryKeyValue}`;
+                const messageKey = `delete-${recordToDelete.key}`;
                 // Keep track if setLoadingData was set within this specific operation
                 let operationLoading = false;
                 try {
-                    setLoadingData(true);
+                    // Indicate loading specifically for delete if needed, or use general loadingData
+                    setLoadingData(true); // Use general data loading indicator
                     operationLoading = true;
                     message.loading({ content: `Deleting record...`, key: messageKey, duration: 0 });
-                    await api.deleteRecord(tableName, primaryKeyValue);
-                    message.success({ content: 'Record deleted successfully!', key: messageKey, duration: 2 });
-                    if (editingKey === `${tableName}-pk-${primaryKeyValue}`) { handleCancel(); }
-                    setError(null);
 
-                    // Refetch data logic:
+                    await api.deleteRecord(dbId, tableName, primaryKeyValue);
+
+                    message.success({ content: 'Record deleted successfully!', key: messageKey, duration: 2 });
+                    if (editingKey === recordToDelete.key) { handleCancel(); } // Cancel edit if the deleted row was being edited
+                    setError(null); // Clear previous errors
+
+                    // Refresh data using useEffect trigger mechanism
                     // Check if it was the last item on a page > 1
-                    const isLastItemOnPage = data.length === 1 && totalRows > 1; // Ensure totalRows is considered
+                    // Use `displayedData` length *before* state update if filtering is active,
+                    // otherwise use `data.length`. Safer to use raw `data.length`.
+                    const isLastItemOnPage = data.length === 1 && totalRows > 1; // Check raw data length
                     const pageToFetch = (isLastItemOnPage && currentPage > 1) ? currentPage - 1 : currentPage;
 
                     if (pageToFetch !== currentPage) {
@@ -663,15 +854,16 @@ const preparePayload = (
                     }
                 } catch (err: any) {
                     message.error({ content: `Failed to delete record: ${err.message || 'Unknown error'}`, key: messageKey, duration: 4 });
-                    console.error('Delete Row Failed:', err);
+                    console.error('DataGrid: Delete Row Failed:', err);
                     setError(`Failed to delete record: ${err.message}`);
-                    // *** Crucial: Stop loading indicator ONLY on error ***
-                    // If successful, the useEffect triggered by state change handles loading
+                    // Stop loading indicator ONLY on error if this operation started it
                     if (operationLoading) {
                         setLoadingData(false);
                     }
+                } finally {
+                     message.destroy(messageKey);
+                     // No setLoadingData(false) needed here in success case, useEffect handles it.
                 }
-                // No finally block needed for setLoadingData here - it's handled by success path (useEffect) or error path (catch)
             },
             onCancel: () => {
                 console.log('Delete cancelled');
@@ -679,260 +871,378 @@ const preparePayload = (
         });
     };
 
+
     // --- Add Column Handlers ---
-    // (No changes needed here - still uses backend API and refreshes schema/data)
     const showAddColModal = () => { addColForm.resetFields(); setIsAddColModalVisible(true); };
+    const handleAddColCancel = () => { setIsAddColModalVisible(false); };
     const handleAddColOk = async () => {
-        if (!tableName) return;
+        if (!dbId || !tableName) return;
         try {
             setConfirmLoadingAddCol(true);
             const values = await addColForm.validateFields();
+
             // Basic validation for column name format (adjust regex if needed)
             if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(values.columnName.trim())) {
                 message.error('Invalid column name. Use letters, numbers, underscores, starting with a letter or underscore.');
                 setConfirmLoadingAddCol(false);
                 return;
             }
+            if (values.columnName.length > 63) { // Example: PostgreSQL identifier length limit
+                 message.error('Column name is too long (max 63 characters typical).');
+                 setConfirmLoadingAddCol(false);
+                 return;
+             }
+
             const payload: NewColumnPayload = {
                 name: values.columnName.trim(),
                 type: values.columnType,
-            // Add other potential fields like nullable, default etc. if API supports them
+                // Future: Add isNullable, defaultValue, etc. from form if implemented
+                // is_nullable: values.isNullable ?? true,
+                // default_value: values.defaultValue || null,
             };
-            console.log("📦 Sending Create Column Payload:", payload);
-            await api.createColumn(tableName, payload);
-            message.success(`Column "${payload.name}" added successfully! Refreshing schema...`);
+            console.log("DataGrid: 📦 Sending Create Column Payload:", payload);
+            await api.createColumn(dbId, tableName, payload);
+            message.success(`Column "${payload.name}" added successfully! Refreshing schema & data...`);
             setIsAddColModalVisible(false);
-            // --- Refresh Schema (which will trigger data refetch via useEffect) ---
-            setLoadingSchema(true);
+
+            // --- Trigger Schema Refetch ---
+            // Setting loadingSchema will automatically trigger data refetch via useEffect dependencies
+            setLoadingSchema(true); // Start schema loading indicator
+            setError(null);
             // Reset states potentially affected by schema change
             setSortConfig({ field: null, order: null }); // Reset frontend sort
             setFilterConfig([]); filterForm.resetFields(); // Reset backend filters
             setGroupingColumn(null); // Reset backend grouping
             setSearchQuery(''); // Reset frontend search
-            api.fetchSchema(tableName)
-            .then(fetchedSchema => {
-                setSchema(fetchedSchema);
-                const pk = fetchedSchema.find(col => col.isPrimaryKey);
-                setPrimaryKeyName(pk ? pk.name : null);
-                setCurrentPage(1); // Go to page 1 after schema change
-            })
-            .catch(err => {
-                console.error("Error during schema refresh after add column:", err);
-                setError(`Schema refresh failed after adding column: ${err.message}`);
-            })
-            .finally(() => { setLoadingSchema(false); }); // This will trigger data fetch useEffect
-        } catch (errorInfo: any) {
-            console.error('Add Column Failed:', errorInfo);
-            const errorMsg = errorInfo?.response?.data?.message || (errorInfo instanceof Error ? errorInfo.message : null) || 'Unknown error';
-            if (errorInfo.errorFields) { message.error('Validation failed.'); }
-            else { message.error(`Failed to add column: ${errorMsg}`); }
-        } finally { setConfirmLoadingAddCol(false); }
-    };
-    const handleAddColCancel = () => { setIsAddColModalVisible(false); };
+            // No need to manually call refreshData or setRefetchTrigger here.
+            // The schema fetch below will handle it.
 
-    // --- Filter Modal Handlers ---
-    // (No changes needed here - still uses backend API)
+             api.fetchSchema(dbId, tableName) // Refetch the schema
+                 .then(fetchedSchema => {
+                     console.log("DataGrid: Schema refreshed after add column:", fetchedSchema);
+                     setSchema(fetchedSchema);
+                     const pk = fetchedSchema.find(col => col.isPrimaryKey);
+                     setPrimaryKeyName(pk ? pk.name : null);
+                     setIsPkAutoGenerated(pk ? Boolean(pk.isAutoGenerated) : false);
+                     setCurrentPage(1); // Go to page 1 after schema change, triggers data fetch
+                 })
+                 .catch(err => {
+                     console.error("DataGrid: Error during schema refresh after add column:", err);
+                     setError(`Schema refresh failed after adding column: ${err.message}`);
+                      // Clear potentially outdated state if schema fails
+                      setSchema([]); setPrimaryKeyName(null); setIsPkAutoGenerated(false);
+                      setData([]); setTotalRows(0);
+                 })
+                 .finally(() => {
+                      setLoadingSchema(false); // Stop schema loading, data fetch useEffect will now run if needed
+                 });
+
+        } catch (errorInfo: any) {
+            console.error('DataGrid: Add Column Failed:', errorInfo);
+            const errorMsg = errorInfo?.response?.data?.error || errorInfo?.response?.data?.message || (errorInfo instanceof Error ? errorInfo.message : null) || 'Unknown error';
+            if (errorInfo.errorFields) { message.error('Validation failed. Check the form.'); }
+            else { message.error(`Failed to add column: ${errorMsg}`); }
+        } finally {
+            setConfirmLoadingAddCol(false);
+        }
+    };
+
+
+    // --- Filter Modal Handlers (Backend Filters) ---
     const showFilterModal = () => {
+         // Ensure existing conditions have unique IDs for Form.List keys
         const initialValues = { conditions: filterConfig.map((cond, index) => ({ ...cond, id: cond.id || Date.now() + index })) };
-        // Ensure all conditions have an ID for the Form.List keys
         initialValues.conditions.forEach((cond, index) => { if (cond.id === undefined) cond.id = Date.now() + index; });
         filterForm.setFieldsValue(initialValues);
         setIsFilterModalVisible(true);
     };
+
     const handleFilterOk = async () => {
         try {
             const values = await filterForm.validateFields();
-            console.log("Filter form values:", values);
-            const newFilterConfig = (values.conditions || [])
-            .filter((cond: FilterCondition) => cond.column && cond.operator)
-            .map((cond: FilterCondition) => {
-            // Ensure ID is preserved or generated if missing
-                const id = cond.id || Date.now() + Math.random();
-                let finalValue = cond.value;
-                if (cond.operator === 'IS NULL' || cond.operator === 'IS NOT NULL') {
-                    finalValue = undefined; // Or explicit null based on API expectation
-                } else if (cond.operator === 'LIKE' || cond.operator === 'NOT LIKE') {
-                finalValue = String(finalValue ?? '');
-                } else if (dayjs.isDayjs(cond.value)) {
-                    finalValue = cond.value.toISOString();
-                }
-                return {
-                    id: id, column: cond.column, operator: cond.operator,
-                    value: finalValue,
-                    logicalOperator: cond.logicalOperator || 'AND'
-                };
-            });
-            console.log("Applying Backend Filter Config:", newFilterConfig);
-            setFilterConfig(newFilterConfig);
-            setCurrentPage(1); // Reset page when backend filters change
+            console.log("DataGrid: Filter form values:", values);
+            const newFilterConfig: FilterCondition[] = (values.conditions || [])
+                .filter((cond: any): cond is FilterCondition => !!(cond && cond.column && cond.operator)) // Type guard and filter invalid
+                .map((cond: any, index: number) => {
+                    // Ensure ID is preserved or generated if missing
+                    const id = cond.id || Date.now() + index; // Use index for fallback key stability
+                    let finalValue = cond.value;
+
+                    // Handle values based on operator
+                    if (cond.operator === 'IS NULL' || cond.operator === 'IS NOT NULL') {
+                        finalValue = undefined; // No value needed for these operators
+                    } else if (dayjs.isDayjs(cond.value)) {
+                        finalValue = cond.value.toISOString(); // Convert dayjs objects to ISO strings
+                    } else if (cond.value !== undefined && cond.value !== null) {
+                        // Ensure other values are strings if needed by backend, or handle types explicitly
+                         finalValue = String(cond.value); // Default to string conversion
+                         // Example: If backend needs numbers for numeric columns:
+                         // const selectedCol = schema.find(c => c.name === cond.column);
+                         // if (selectedCol && numericTypesLC.includes(selectedCol.type...)) {
+                         //    finalValue = Number(cond.value); // Convert to number if applicable
+                         // }
+                    } else if (cond.operator !== 'IS NULL' && cond.operator !== 'IS NOT NULL') {
+                        // If value is required but is null/undefined, set to empty string? Or handle as error?
+                        // Setting to empty string might be unexpected for non-text types.
+                        // Validation rule `required: needsValue` should prevent this case.
+                        console.warn(`Filter value for ${cond.column} ${cond.operator} is unexpectedly null/undefined.`);
+                        finalValue = ''; // Or null depending on API expectation
+                    }
+
+                    return {
+                        id: id,
+                        column: cond.column,
+                        operator: cond.operator,
+                        value: finalValue,
+                        logicalOperator: cond.logicalOperator || 'AND' // Default to AND
+                    };
+                });
+
+            console.log("DataGrid: Applying Backend Filter Config:", newFilterConfig);
+            // Only update state if the filter config actually changed (deep comparison might be better)
+            if (JSON.stringify(filterConfig) !== JSON.stringify(newFilterConfig)) {
+                 setFilterConfig(newFilterConfig);
+                 setCurrentPage(1); // Reset page when backend filters change
+                 // useEffect will handle data fetch with new filters
+             } else {
+                 console.log("DataGrid: Filter config unchanged.");
+             }
             setIsFilterModalVisible(false);
-            // useEffect will handle data fetch with new filters
         } catch (errorInfo) {
-            console.log('Filter validation failed:', errorInfo);
-            message.error("Please fill all required filter fields.");
+            console.log('DataGrid: Filter validation failed:', errorInfo);
+            message.error("Please fill all required filter fields correctly.");
         }
     };
+
     const handleFilterCancel = () => { setIsFilterModalVisible(false); };
+
     const handleClearFilters = () => {
-        setFilterConfig([]); // Clear backend filters
-        filterForm.resetFields();
-        setCurrentPage(1); // Reset page
-        setIsFilterModalVisible(false);
-        // useEffect will handle data fetch without filters
+        if (filterConfig.length > 0) {
+            setFilterConfig([]); // Clear backend filters
+            filterForm.resetFields();
+            setCurrentPage(1); // Reset page
+            // useEffect will handle data fetch without filters
+        }
+        setIsFilterModalVisible(false); // Close modal regardless
     };
 
-    // --- Grouping Handler ---
+    // --- Grouping Handler (Backend Grouping) ---
     const handleGroupingChange = (value: string | null) => {
-    if (editingKey) { message.warning('Please save or cancel edit first.'); return; }
-        setGroupingColumn(value);
-        setCurrentPage(1);
+        if (editingKey) { message.warning('Please save or cancel edit first.'); return; }
+        if (groupingColumn !== value) {
+             setGroupingColumn(value);
+             setCurrentPage(1); // Reset to page 1 when grouping changes
+             // useEffect will handle data refetch with new grouping
+         }
     };
 
     // --- Upload Modal and Handlers ---
     const showUploadModal = () => setIsUploadModalVisible(true);
-    const handleUploadModalCancel = () => setIsUploadModalVisible(false);
-
-    const handleUploadChange: UploadProps['onChange'] = (info) => {
-        if (info.file.status === 'uploading') {
-            setUploading(true);
+    const handleUploadModalCancel = () => {
+        if (uploading) {
+            message.warning("Upload is in progress."); // Prevent closing during upload if desired
             return;
         }
-        if (info.file.status === 'done') {
+        setIsUploadModalVisible(false);
+    };
+
+    const handleUploadChange: UploadProps['onChange'] = (info) => {
+        const { status, name, response, error: uploadError } = info.file;
+        console.log(`Upload status change for ${name}: ${status}`);
+
+        if (status === 'uploading') {
+            // Already handled by customRequest setting state
+            // setUploading(true);
+            return;
+        }
+        if (status === 'done') {
             setUploading(false);
-            message.success(`${info.file.name} uploaded successfully. Refreshing data...`);
-            handleUploadModalCancel();
-            const needsRefetch = currentPage === 1;
-            setCurrentPage(1);
-            // Force refetch if already on page 1
-            if (needsRefetch) {
-                console.log("Forcing refetch on current page after upload.");
-                if (groupingColumn === null) setGroupingColumn(null); else setFilterConfig([...filterConfig]);
+            console.log("Upload response:", response); // Log backend response on success
+            message.success(`${name} uploaded successfully. Refreshing data...`);
+            handleUploadModalCancel(); // Close modal on success
+
+            // Refresh data - go to page 1 and trigger refetch
+            const wasAlreadyOnPage1 = currentPage === 1;
+            if (!wasAlreadyOnPage1) {
+                 setCurrentPage(1); // Triggers fetch via useEffect
+            } else {
+                 setRefetchTrigger(c => c + 1); // Force refetch on page 1 via trigger
             }
-        } else if (info.file.status === 'error') {
+            // Reset filters/sort/grouping after upload? Optional.
+            // setFilterConfig([]);
+            // setGroupingColumn(null);
+            // setSortConfig({ field: null, order: null });
+            // setSearchQuery('');
+
+        } else if (status === 'error') {
             setUploading(false);
-            // Error message is handled by customRequest's onError -> message.error
-            console.error("Upload failed (onChange):", info.file.error);
-            // Maybe keep modal open on error? Or display error more prominently?
-            // message.error(`${info.file.name} file upload failed.`); // Already shown in customRequest
+            // Error message is usually handled by customRequest's onError -> message.error
+            console.error(`Upload failed (onChange): ${name}`, uploadError);
+            // message.error(`${name} file upload failed.`); // Can be redundant if customRequest shows error
         }
     };
 
     const customUploadRequest = async (options: any) => {
         const { onSuccess, onError, file, onProgress } = options;
-        if (!tableName) {
-            const err = new Error("Table name not selected");
-            message.error(err.message); // Show message
-            onError(err); // Reject promise
+        if (!dbId || !tableName) {
+            const err = new Error("Database or Table not selected for upload");
+            message.error(err.message);
+            onError(err); // Reject promise for Ant Design upload state
             return;
         }
 
         const formData = new FormData();
-        formData.append('file', file as RcFile);
+        formData.append('file', file as RcFile); // 'file' should match backend expectation
 
         try {
-            setUploading(true); // Ensure uploading state is true
-            console.log(`Uploading file ${file.name} to table ${tableName}`);
-            const response = await api.uploadData(tableName, formData, (event) => {
+            setUploading(true); // Set uploading state at the start
+            console.log(`DataGrid: Uploading file ${file.name} to DB ${dbId}, Table ${tableName}`);
+
+            // Call API with dbId and tableName
+            const response = await api.uploadData(dbId, tableName, formData, (event) => {
+                // Progress reporting
                 if (event.lengthComputable && event.total > 0) {
                     const percent = Math.floor((event.loaded / event.total) * 100);
+                    console.log(`Upload progress: ${percent}%`);
                     onProgress({ percent });
                 } else {
-                    // Indicate progress without percentage if total is unknown
-                    onProgress({ percent: 50 }); // Or some other indicator
+                    // Indicate indeterminate progress if total size is unknown
+                    onProgress({ percent: 50 }); // Or leave empty/handle differently
                 }
             });
 
-            onSuccess(response, file); // Trigger onChange 'done' status
+            // Success callback for Ant Design
+            onSuccess(response, file); // response is passed to onChange handler's file.response
+
         } catch (err: any) {
             setUploading(false); // Stop uploading on error
-            console.error("Upload failed (customRequest):", err);
-            const errorMsg = err?.response?.data?.message || err.message || 'Upload failed';
-            message.error(`Upload Failed: ${errorMsg}`); // Show error message clearly
-            onError(new Error(errorMsg), { message: errorMsg }); // Trigger onChange 'error' status
+            console.error("DataGrid: Upload failed (customRequest):", err);
+            // Extract more specific error message if possible
+            const errorMsg = err?.response?.data?.error // Prioritize specific 'error' field
+                            || err?.response?.data?.message // Fallback to 'message' field
+                            || err?.message // Fallback to generic error message
+                            || 'File upload failed';
+            message.error(`Upload Failed: ${errorMsg}`, 5); // Show error message clearly and longer
+            // Error callback for Ant Design
+            onError(new Error(errorMsg), { message: errorMsg }); // Pass error object and details
+
         }
+        // No finally block for setUploading(false) here, handled in done/error paths
     };
 
     const beforeUploadCheck = (file: RcFile): boolean | Promise<void> => {
+         console.log("Checking file before upload:", file.name, file.type, file.size);
         const fileExtension = `.${file.name.split('.').pop()?.toLowerCase()}`;
-        const isAcceptedType = ACCEPTED_UPLOAD_TYPES.includes(file.type) || ACCEPTED_UPLOAD_EXTENSIONS_STRING.toLowerCase().includes(fileExtension);
+        // Check both MIME type and extension for robustness
+        const isAcceptedType = ACCEPTED_UPLOAD_TYPES.some(accepted =>
+            (accepted.startsWith('.') && fileExtension === accepted) || // Check extension
+            (!accepted.startsWith('.') && file.type === accepted) // Check MIME type
+        );
 
         if (!isAcceptedType) {
             message.error(`Invalid file type. Allowed types: ${ACCEPTED_UPLOAD_EXTENSIONS_STRING}. Detected: ${file.type || fileExtension}`);
             return Upload.LIST_IGNORE; // Prevent upload
         }
+
         const isLt50M = file.size / 1024 / 1024 < 50; // Example: Limit size to 50MB
         if (!isLt50M) {
-            message.error('File must be smaller than 50MB!');
+            message.error('File too large! Must be smaller than 50MB.');
             return Upload.LIST_IGNORE; // Prevent upload
         }
-        console.log("File check OK:", file.name, file.type);
-        return true; // Proceed with upload
+
+        console.log("File check OK:", file.name);
+        return true; // Proceed with upload (Ant Design will call customRequest)
     };
+
+
+    // --- Column Definitions ---
     const columns = useMemo((): ColumnsType<any> => {
         if (!schema || schema.length === 0) return [];
 
-        // Serial Number Column (Frontend generated, based on filtered/sorted index)
+        // Serial Number Column (Frontend generated, reflects position across pages - CodeB logic)
         const serialNumberColumn: ColumnsType<any>[0] = {
             title: 'S.No.', key: 'frontend_sno', width: 70, fixed: 'left', align: 'center',
-            render: (_, __, index) => index + 1, // Index within the *displayedData* array
+            render: (_, __, index) => (currentPage - 1) * pageSize + index + 1,
         };
 
+        const displaySchema = schema.filter(col => col.name !== 'serial_num');
+        // --- END CHANGE --
         // Data Columns from Schema
-        const dataColumns: ColumnsType<any> = schema.map((col) => {
-            const editable = !col.isPrimaryKey && !col.isForeignKey; // Basic editability rule
-            const isDate = ['date', 'timestamp', 'datetime', 'timestamptz'].includes(col.type.toLowerCase().split('(')[0]);
-            const isBoolean = ['boolean', 'bool'].includes(col.type.toLowerCase().split('(')[0]);
+        const dataColumns: ColumnsType<any> = displaySchema.map((col) => {
+            // Determine editability (e.g., don't edit auto-generated PKs)
+            const editable = !(col.isPrimaryKey && isPkAutoGenerated);
+            const isCurrentlyEditingRow = (recordKey: string) => recordKey === editingKey;
+
+            // Extract base type for rendering logic
+             const colTypeLC = col.type.toLowerCase().split('(')[0].split(' ')[0];
+            const dateTypesLC = ['date', 'timestamp', 'datetime', 'timestamptz'];
+            const booleanTypesLC = ['boolean', 'bool'];
+            const numericTypesLC = ['numeric', 'integer', 'int', 'bigint', 'smallint', 'float', 'double', 'decimal', 'real', 'serial', 'bigserial'];
+
 
             return {
-                title: col.name,
+                title: () => ( // Use function for title to include tooltip easily
+                     <Tooltip title={`${col.name} (${col.type})${col.isPrimaryKey ? ' [PK]' : ''}${!col.isNullable ? ' [Required]' : ''}`}>
+                         <span style={{ fontWeight: col.isPrimaryKey ? 600 : 400 }}>
+                            {col.name}
+                            {/* Optional: Add PK indicator visually */}
+                            {/* {col.isPrimaryKey ? <sup style={{ color: 'red', marginLeft: '2px' }}>PK</sup> : ''} */}
+                         </span>
+                     </Tooltip>
+                 ),
                 dataIndex: col.name,
-                key: col.name, // Essential for sorter/filter matching (used as columnKey)
-                ellipsis: true, // Enable ellipsis by default
-                width: col.name === primaryKeyName ? 120 : 180, // Adjust width
+                key: col.name, // Essential for sorter/filter matching (should match dataIndex)
+                ellipsis: { showTitle: false }, // Enable ellipsis, disable browser default title
+                width: col.name === primaryKeyName ? 120 : 180, // Adjust width (example)
                 sorter: true, // Enable frontend sorting via header click (triggers handleTableChange)
                 sortOrder: sortConfig.field === col.name ? sortConfig.order : null, // Reflect current frontend sort state
+                align: numericTypesLC.includes(colTypeLC) ? 'right' : 'left', // Align numbers right
+
                 render: (text: any, record: any) => {
-                    const editing = isEditing(record);
-                    if (editing && editable) {
+                    const editingThisCell = isCurrentlyEditingRow(record.key) && editable;
+
+                    if (editingThisCell) {
+                        // Render input for editing
                         const InputComponent = renderFormInput(col);
                         return (
-                            // No need for Form.Item wrapper here if we manage edit state directly
+                            // Form.Item wrapper is not strictly needed here if we manage state directly
                             React.cloneElement(InputComponent, {
                                 value: editingRowData ? editingRowData[col.name] : undefined,
-                                onChange: (eOrValue: any) => {
-                                    // Handle different event types (direct value, event object, dayjs object)
-                                    let value = eOrValue;
-                                    if (eOrValue && eOrValue.target) {
-                                    value = eOrValue.target.type === 'checkbox' ? eOrValue.target.checked : eOrValue.target.value;
-                                    } else if (dayjs.isDayjs(eOrValue)) {
-                                        value = eOrValue; // Keep dayjs object for DatePicker
-                                    }
-                                    handleEditingInputChange(value, col.name);
-                                },
-                                onPressEnter: handleSave,
-                            style: { ...InputComponent.props.style }
-                        })
-                    );
+                                onChange: (eOrValue: any) => handleEditingInputChange(eOrValue, col.name),
+                                onPressEnter: handleSave, // Save on Enter key
+                                style: { ...InputComponent.props.style, margin: '-5px 0' }, // Adjust style for compact table cell
+                                autoFocus: Object.keys(editingRowData || {}).length > 1 && Object.keys(editingRowData || {})[1] === col.name // Autofocus first editable field?
+                            })
+                        );
                     } else {
-                        // Display formatting
+                        // Display formatted text
                         let displayText = text;
                         if (text === null || text === undefined) {
                             return <i style={{ color: '#ccc' }}>NULL</i>;
                         }
-                        if (isBoolean) {
-                            displayText = String(text); // Display 'true' or 'false'
-                        } else if (isDate) {
+
+                        if (booleanTypesLC.includes(colTypeLC)) {
+                            displayText = String(text); // Display 'true' or 'false' explicitly
+                        } else if (dateTypesLC.includes(colTypeLC)) {
                             try {
-                                // Format date consistently, handle potential invalid dates gracefully
+                                // Format date/timestamp consistently using dayjs
                                 const date = dayjs(text);
-                                displayText = date.isValid() ? date.format(col.type.toLowerCase().includes('timestamp') ? 'YYYY-MM-DD HH:mm:ss' : 'YYYY-MM-DD') : 'Invalid Date';
-                            } catch { displayText = String(text); } // Fallback if dayjs fails
+                                if (date.isValid()) {
+                                    const showTime = colTypeLC.includes('timestamp') || colTypeLC.includes('datetime');
+                                    displayText = date.format(showTime ? 'YYYY-MM-DD HH:mm:ss' : 'YYYY-MM-DD');
+                                } else {
+                                     displayText = 'Invalid Date'; // Show if date parsing failed
+                                }
+                            } catch { displayText = String(text); } // Fallback if dayjs fails unexpectedly
                         } else {
+                            // For other types (text, numbers, json, uuid), convert to string for display
                             displayText = String(text);
                         }
+
+                        // Use Tooltip for potentially truncated content due to ellipsis
                         return (
                             <Tooltip title={displayText} placement="topLeft">
-                                <Text ellipsis={true} style={{ maxWidth: '100%' /* Ensure ellipsis works */ }}>
+                                <Text style={{ display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                                     {displayText}
                                 </Text>
                             </Tooltip>
@@ -942,27 +1252,36 @@ const preparePayload = (
             };
         });
 
+        // Actions Column (Edit/Delete)
         const actionsColumn: ColumnsType<any>[0] | null = primaryKeyName ? {
-            title: 'Actions', key: 'actions', width: 120, fixed: 'right',
+            title: 'Actions', key: 'actions', width: 120, fixed: 'right', align: 'center',
             render: (_, record) => {
                 const editing = isEditing(record);
-                const pkValue = record[primaryKeyName];
-                // Disable actions if PK missing, data loading, uploading, or another row is being edited
-                const actionsDisabled = pkValue === undefined || pkValue === null || loadingData || uploading || (!editing && editingKey !== '');
-                // Disable Save button only if data is loading during the save operation itself (handled inside handleSave)
-                const saveButtonLoading = loadingData && editingKey === record.key;
+                 // Try to get PK value even if PK name was initially null but inferred
+                 const currentPkName = primaryKeyName || Object.keys(record).find(k => k !== 'key' && `row-${dbId}-${tableName}-pk-${record[k]}` === record.key);
+                 const pkValue = currentPkName ? record[currentPkName] : undefined;
+
+                // Disable actions if:
+                // - Another row is being edited (!editing && editingKey !== '')
+                // - Data is loading (loadingData)
+                // - Upload is in progress (uploading)
+                // - Primary key value is missing (pkValue === undefined/null) - prevents actions on rows without PK
+                const actionsDisabled = (!editing && editingKey !== '') || loadingData || uploading || pkValue === undefined || pkValue === null;
+                // Disable Save button *specifically* if its own row is saving (covered by general loadingData check usually)
+                const saveButtonLoading = loadingData && editingKey === record.key; // Saving this specific row
+
                 return (
                     <Space size="small">
                     {editing ? (
-                    <>
-                    <Button type="primary" onClick={handleSave} size="small" loading={saveButtonLoading}>Save</Button>
-                    <Button onClick={handleCancel} size="small" disabled={loadingData || uploading}>Cancel</Button>
-                    </>
+                        <>
+                            <Button type="primary" onClick={handleSave} size="small" loading={saveButtonLoading} disabled={uploading}>Save</Button>
+                            <Button onClick={handleCancel} size="small" disabled={saveButtonLoading || uploading}>Cancel</Button>
+                        </>
                     ) : (
-                    <>
-                    <Button type="link" size="small" disabled={actionsDisabled} onClick={() => handleEdit(record)}>Edit</Button>
-                    <Button type="link" size="small" danger disabled={actionsDisabled} onClick={() => handleDelete(pkValue)}>Delete</Button>
-                    </>
+                        <>
+                            <Button type="link" size="small" disabled={actionsDisabled} onClick={() => handleEdit(record)}>Edit</Button>
+                            <Button type="link" size="small" danger disabled={actionsDisabled} onClick={() => handleDelete(record)}>Delete</Button>
+                        </>
                     )}
                 </Space>
                 );
@@ -970,287 +1289,506 @@ const preparePayload = (
         } : null;
 
         return [ serialNumberColumn, ...dataColumns, ...(actionsColumn ? [actionsColumn] : []) ];
-    }, [schema, primaryKeyName, editingKey, editingRowData, loadingData, sortConfig, currentPage, pageSize, data, searchQuery]); // Added data and searchQuery as dependencies for displayedData/S.No
+
+    }, [
+        schema, primaryKeyName, isPkAutoGenerated, // Schema related
+        editingKey, editingRowData, // Editing state
+        loadingData, uploading, // Loading states
+        sortConfig, // For sortOrder
+        currentPage, pageSize, // For S.No.
+        handleSave, handleCancel, handleEdit, handleDelete, handleEditingInputChange, // Action handlers
+        renderFormInput // Helper dependency
+    ]);
+
 
     // --- Component Render ---
-    if (!tableName && !error && !loadingSchema) {
-        return <Empty description="Select a table from the sidebar" style={{ marginTop: 50 }} />;
+    if (!dbId || !tableName) {
+        // Initial state before selection
+        return <Empty description="Select a database and table from the sidebar" style={{ marginTop: 50 }} />;
     }
 
+    // Loading state or Empty table state
+    const isLoading = loadingSchema || loadingData;
+    const isEmptyTable = !isLoading && !error && schema.length === 0 && dbId && tableName; // Schema loaded but empty
+    const noDataFound = !isLoading && !error && schema.length > 0 && displayedData.length === 0 && data.length === 0; // Data loaded, but zero rows returned from backend
+    const noSearchResults = !isLoading && !error && displayedData.length === 0 && data.length > 0 && searchQuery; // Frontend search filtered everything
+
+    const getEmptyText = () => {
+        if (loadingSchema) return <Spin tip="Loading schema..." />;
+        if (loadingData) return <Spin tip="Loading data..." />; // Covered by outer Spin, but for clarity
+        if (error) return `Error loading data: ${error}`;
+        if (isEmptyTable) return `Table "${tableName}" has no columns defined.`;
+        if (noSearchResults) return `No data matching "${searchQuery}" on this page.`;
+        if (noDataFound) return `No data found for table "${tableName}" with current filters.`;
+        // Default Ant Design empty state will be used if none of the above match
+         return <Empty description="No Data"/>;
+    };
+
+
     return (
+        <div style={{ padding: '15px', height: '100%', display: 'flex', flexDirection: 'column', background: '#fff' }}>
 
-        <div style={{ padding: '15px', height: '100%', display: 'flex', flexDirection: 'column' }}>
-        {/* Header */}
-        <div style={{ marginBottom: '10px', flexShrink: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Title level={4} style={{ margin: 0 }}>
-        {tableName ? `Table: ${tableName}` : 'Select a Table'}
-        {loadingSchema && <Spin size="small" style={{ marginLeft: '10px' }} />}
-        </Title>
-        {/* Grouping Dropdown (Backend Grouping - Unchanged) */}
-        {schema.length > 0 && !loadingSchema && (
-            <Space>
-            <GroupOutlined title="Group By (backend operation)" />
-            <Select
-            allowClear placeholder="Group By" style={{ width: 150 }}
-            value={groupingColumn}
-            onChange={handleGroupingChange} // Triggers backend fetch
-            disabled={loadingData || editingKey !== '' || uploading}
-            title="Group By (backend operation)"
-                >
-            {schema.map(col => ( <Option key={col.name} value={col.name}>{col.name}</Option> ))}
-            </Select>
-            </Space>
-        )}
-        </div>
+            {/* Header Area */}
+            <div style={{ marginBottom: '10px', flexShrink: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+                 <Title level={4} style={{ margin: 0, flexGrow: 1, minWidth: '200px' }}>
+                     {`DB: ${dbId} / Table: ${tableName}`}
+                     {loadingSchema && <Spin size="small" style={{ marginLeft: '10px' }} />}
+                 </Title>
+                 {/* Grouping Dropdown (Backend Grouping) */}
+                 {schema.length > 0 && !loadingSchema && (
+                     <Space>
+                         <GroupOutlined title="Group By (backend operation)" />
+                         <Select
+                             allowClear placeholder="Group By (Backend)" style={{ width: 150 }}
+                             value={groupingColumn}
+                             onChange={handleGroupingChange} // Triggers backend fetch
+                             disabled={isLoading || editingKey !== '' || uploading}
+                             title="Group By (backend operation)"
+                         >
+                             {schema.map(col => ( <Option key={col.name} value={col.name}>{col.name}</Option> ))}
+                         </Select>
+                     </Space>
+                 )}
+            </div>
+
+             {/* Error Alert */}
+             {error && (
+                 <Alert message={error} type="error" showIcon closable onClose={() => setError(null)} style={{ marginBottom: '10px', flexShrink: 0 }} />
+             )}
 
 
-        {/* Error Alert */}
-        {error && (
-        <Alert message={error} type="error" showIcon closable onClose={() => setError(null)} style={{ marginBottom: '10px', flexShrink: 0 }} />
-        )}
+            {/* Toolbar Area */}
+            <div style={{ marginBottom: '15px', flexShrink: 0, display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
+                 {/* Left Side Actions */}
+                 <Space wrap>
+                     {/* Add Row enabled only if PK exists (needed for reliable ops) */}
+                     <Button
+                         type="primary"
+                         icon={<PlusOutlined />}
+                         onClick={showAddModal}
+                         disabled={!primaryKeyName || isLoading || editingKey !== '' || uploading || !tableName || schema.length === 0}
+                         title={!primaryKeyName ? "Cannot add row: Primary Key not identified" : "Add a new record"}
+                     >
+                         Add Row
+                     </Button>
+                     {/* Add Column enabled if table context exists */}
+                     <Button
+                         onClick={showAddColModal}
+                         disabled={isLoading || editingKey !== '' || uploading || !tableName}
+                     >
+                         Add Column
+                     </Button>
+                      {/* Upload enabled if table context exists */}
+                     <Button
+                         icon={<UploadOutlined />}
+                         onClick={showUploadModal}
+                         disabled={isLoading || uploading || editingKey !== '' || !tableName || schema.length === 0} // Disable if no schema/cols
+                         loading={uploading}
+                     >
+                         {uploading ? 'Uploading...' : 'Upload Data'}
+                     </Button>
+                 </Space>
 
-        {/* Toolbar */}
-        <div style={{ marginBottom: '15px', flexShrink: 0, display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
-        {/* Left Side Actions */}
-        <Space wrap>
-            <Button type="primary" onClick={showAddModal} disabled={!tableName || !schema.length || !primaryKeyName || loadingSchema || loadingData || editingKey !== '' || uploading}>Add Row</Button>
-            <Button onClick={showAddColModal} disabled={!tableName /* Allow even if schema empty? */ || loadingSchema || loadingData || editingKey !== '' || uploading}>Add Column</Button>
-            <Button icon={<UploadOutlined />} onClick={showUploadModal} disabled={!tableName || loadingSchema || loadingData || uploading || editingKey !== ''}>Upload Data</Button>
-        </Space>
-        {/* Right Side Actions */}
-        <Space wrap>
-        <Input.Search
-            placeholder="Search current page" // Updated placeholder
-            allowClear
-            // Use defaultValue and onChange with debounce for frontend search
-            defaultValue={searchQuery}
-            onChange={(e) => debouncedSearch(e.target.value)} // Update state via debounce for frontend filtering
-            onSearch={(value) => { // Trigger search immediately on Enter/Click for frontend filtering
-                    debouncedSearch.cancel(); // Cancel previous debounce timer
-                    setSearchQuery(value); // Set search query directly
-            }}
-            style={{ width: 250 }}
-            disabled={!tableName || loadingSchema || loadingData || editingKey !== '' || uploading}
-            enterButton
-        />
-        {/* Backend Filter Button - Unchanged */}
-        <Tooltip title="Filter Data (backend)">
-            <Button icon={<FilterOutlined />} onClick={showFilterModal} disabled={!tableName || !schema.length || loadingSchema || loadingData || editingKey !== '' || uploading}>
-                Filters {filterConfig.length > 0 ? `(${filterConfig.length})` : ''}
-            </Button>
-        </Tooltip>
-        {/* Backend Filter Clear Button - Unchanged */}
-        {filterConfig.length > 0 && (
-            <Tooltip title="Clear All Backend Filters">
-                <Button danger icon={<ClearOutlined />} onClick={handleClearFilters} disabled={loadingData || editingKey !== '' || uploading} />
-            </Tooltip>
-        )}
-        </Space>
-        </div>
+                 {/* Right Side Actions */}
+                 <Space wrap>
+                     {/* Frontend Search Input */}
+                     <Input.Search
+                         placeholder="Search current page"
+                         allowClear
+                         defaultValue={searchQuery} // Controlled component might be better if resetting search often
+                         onChange={(e) => debouncedSearch(e.target.value)} // Update state via debounce
+                         onSearch={(value) => { // Trigger search immediately on Enter/Click
+                             debouncedSearch.cancel(); // Cancel previous debounce timer
+                             setSearchQuery(value); // Set search query directly
+                         }}
+                         style={{ width: 250 }}
+                         disabled={isLoading || editingKey !== '' || uploading || !tableName || schema.length === 0 || data.length === 0} // Disable if no data on page
+                         enterButton={<SearchOutlined />}
+                     />
+                     {/* Backend Filter Button */}
+                     <Tooltip title="Filter Data (backend operation)">
+                         <Button
+                             icon={<FilterOutlined />}
+                             onClick={showFilterModal}
+                             disabled={isLoading || editingKey !== '' || uploading || !tableName || schema.length === 0}
+                         >
+                             Filters {filterConfig.length > 0 ? `(${filterConfig.length})` : ''}
+                         </Button>
+                     </Tooltip>
+                     {/* Backend Filter Clear Button */}
+                     {filterConfig.length > 0 && (
+                         <Tooltip title="Clear All Backend Filters">
+                             <Button
+                                 danger icon={<ClearOutlined />}
+                                 onClick={handleClearFilters}
+                                 disabled={isLoading || editingKey !== '' || uploading}
+                             />
+                         </Tooltip>
+                     )}
+                 </Space>
+            </div>
 
-        {/* Table Area */}
-        <div style={{ flexGrow: 1, overflow: 'hidden', border: '1px solid #f0f0f0' }}>
-            {/* Spin covers the Table for data loading, but not schema loading */}
-            <Spin spinning={loadingData && !error && !uploading} tip="Loading page data...">
-                <Table
-                    columns={columns}
-                    // dataSource={loadingSchema ? [] : data} // OLD: Used raw data
-                    dataSource={loadingSchema ? [] : displayedData} // NEW: Use filtered and sorted data
-                    rowKey="key"
-                    pagination={false} // Use external pagination controls
-                    // Adjust scroll height based on typical layout elements
-                    scroll={{ x: 'max-content', y: 'calc(100vh - 350px)' }} // Fine-tune this value as needed
-                    size="small"
-                    bordered
-                    locale={{ emptyText: (loadingSchema || loadingData) ? <Spin size="small" /> : <Empty description={error ? "Error loading data" : (searchQuery ? "No matching data on this page" : "No data found")} /> }}
-                    onChange={handleTableChange} // Handles sorting clicks (now frontend)
-                    // Table's internal loading indicator might be redundant with the Spin wrapper
-                    loading={false /* loadingData */} // Controlled by Spin wrapper
-                />
-            </Spin>
-        </div>
 
-        {/* Pagination Area */}
-        <div style={{ marginTop: '16px', textAlign: 'right', flexShrink: 0 }}>
-            {/* Pagination is still driven by totalRows from backend */}
-            {totalRows > 0 && !loadingSchema && (
-                <Pagination
-                    current={currentPage} pageSize={pageSize} total={totalRows}
-                    onChange={(page, size) => {
-                        // Prevent pagination change during edit
-                        if (editingKey) { message.warning('Please save or cancel edit first.'); return; }
+            {/* Table Area */}
+            <div style={{ flexGrow: 1, overflow: 'hidden', border: '1px solid #f0f0f0', position: 'relative' /* For Spin overlay */ }}>
+                 {/* Spin covers the Table */}
+                 <Spin spinning={loadingData && !error && !uploading} tip="Loading page data...">
+                     <Table
+                        columns={columns}
+                        dataSource={displayedData} // Use filtered and sorted data for display
+                        rowKey="key" // Use the generated unique key
+                        pagination={false} // Use external pagination controls
+                        scroll={{ x: 'max-content', y: 'calc(100vh - 350px)' }} // Adjust scroll height dynamically
+                        size="small"
+                        bordered
+                        locale={{ emptyText: getEmptyText() }}
+                        onChange={handleTableChange} // Handles frontend sorting clicks
+                        // loading={isLoading} // Controlled by outer Spin wrapper is cleaner
+                        sticky // Make header sticky (requires scroll.y)
+                    />
+                 </Spin>
+            </div>
 
-                        let needsPageReset = false;
-                        // Handle page size change
-                        if (size && size !== pageSize) {
-                            setPageSize(size);
-                            // Go to page 1 when page size changes to avoid inconsistent views
-                            if (currentPage !== 1) {
-                                setCurrentPage(1);
-                                needsPageReset = true; // Flag that page is reset due to size change
-                            }
-                            // The main useEffect will refetch page 1 with the new size
-                        }
-                        // Handle page number change (only if not already reset by size change)
-                        if (!needsPageReset && page !== currentPage) {
-                            setCurrentPage(page);
-                            // The main useEffect will refetch the new page data
-                        }
-                        // Reset frontend search/sort when changing page? Optional, decided against for now.
-                        // setSearchQuery('');
-                        // setSortConfig({ field: null, order: null });
-                    }}
-                    showSizeChanger showQuickJumper pageSizeOptions={['10', '20', '50', '100']}
-                    showTotal={(total, range) => {
-                        // Show total based on backend count, range is adjusted for display
-                        const start = (currentPage - 1) * pageSize + 1;
-                        const end = start + displayedData.length - 1; // End based on displayed data length
-                        return displayedData.length > 0 ? `${start}-${end} of ${total} items` : `0 of ${total} items`;
-                    }}
-                    disabled={loadingData || editingKey !== '' || uploading}
-                />
-            )}
-        </div>
+            {/* Pagination Area */}
+            <div style={{ marginTop: '16px', textAlign: 'right', flexShrink: 0 }}>
+                 {/* Pagination driven by totalRows from backend */}
+                 {totalRows > 0 && !loadingSchema && (
+                     <Pagination
+                         current={currentPage}
+                         pageSize={pageSize}
+                         total={totalRows} // Total items from backend
+                         onChange={(page, size) => {
+                             // Prevent pagination change during edit/upload
+                             if (editingKey) { message.warning('Please save or cancel edit first.'); return; }
+                             if (uploading) { message.warning('Please wait for upload to complete.'); return; }
 
-        {/* --- Modals --- */}
-        {/* Add Row Modal - Unchanged */}
-        {isAddModalVisible && ( <Modal title={`Add New Row to ${tableName}`} visible={isAddModalVisible} onOk={handleAddOk} confirmLoading={confirmLoadingAdd} onCancel={handleAddCancel} okText="Add Row" destroyOnClose maskClosable={false} width={600} >
-            <Form form={addForm} layout="vertical" name="add_row_form">
-            {schema.filter(col => !col.isPrimaryKey).map(col => (
-                <Form.Item key={`add-${col.name}`} name={col.name} label={`${col.name} (${col.type})`} rules={[{ required: !col.isNullable && !col.hasDefault, message: `${col.name} is required` }]} >
-                    {renderFormInput(col)}
-                </Form.Item>
-            ))}
-            </Form>
-        </Modal> )}
+                             const newPageSize = size || pageSize;
+                             let needsPageReset = false;
 
-        {/* Add Column Modal - Unchanged */}
-        {isAddColModalVisible && ( <Modal title={`Add New Column to ${tableName}`} visible={isAddColModalVisible} onOk={handleAddColOk} confirmLoading={confirmLoadingAddCol} onCancel={handleAddColCancel} okText="Add Column" destroyOnClose maskClosable={false} >
-            <Form form={addColForm} layout="vertical" name="add_column_form">
-                <Form.Item name="columnName" label="Column Name" rules={[ { required: true, message: 'Column name is required' }, { pattern: /^[a-zA-Z_][a-zA-Z0-9_]*$/, message: 'Invalid name (letters, numbers, _, starting with letter or _)'} ]} >
-                    <Input placeholder="e.g., email or user_status"/>
-                </Form.Item>
-                <Form.Item name="columnType" label="Column Type" rules={[{ required: true, message: 'Column type is required' }]} >
-                    <Select placeholder="Select data type">
-                        {SUPPORTED_COLUMN_TYPES.map(type => ( <Option key={type} value={type}>{type}</Option> ))}
-                    </Select>
-                </Form.Item>
-            </Form>
-        </Modal> )}
+                             // Handle page size change -> reset to page 1
+                             if (newPageSize !== pageSize) {
+                                 setPageSize(newPageSize);
+                                 if (currentPage !== 1) {
+                                     setCurrentPage(1);
+                                     needsPageReset = true;
+                                 }
+                                 // Data fetch for page 1 with new size will be triggered by useEffect
+                             }
 
-        {/* Filter Modal (Backend Filters) - Unchanged */}
-        {isFilterModalVisible && ( <Modal title="Apply Filters (backend)" visible={isFilterModalVisible} onOk={handleFilterOk} onCancel={handleFilterCancel} okText="Apply" width={850} destroyOnClose maskClosable={false} footer={
-            <Space style={{ width: '100%', justifyContent: 'space-between' }}>
-                <Button danger onClick={handleClearFilters} disabled={filterConfig.length === 0}>Clear All Filters</Button>
-                <Space>
-                    <Button onClick={handleFilterCancel}>Cancel</Button>
-                    <Button type="primary" onClick={handleFilterOk}>Apply</Button>
-                </Space>
-            </Space>}
-            >
-            <Form form={filterForm} name="filter_form" autoComplete="off">
-                <Form.List name="conditions">
-                {(fields, { add, remove }) => ( <>
-                    {fields.map(({ key, name, ...restField }, index) => (
-                        <Space key={key} style={{ display: 'flex', marginBottom: 8, alignItems: 'baseline', flexWrap: 'nowrap' }} align="baseline">
-                            {index > 0 && ( <Form.Item {...restField} name={[name, 'logicalOperator']} initialValue="AND" rules={[{ required: true, message: 'AND/OR?' }]} >
-                                <Select style={{ width: 70 }}> <Option value="AND">AND</Option> <Option value="OR">OR</Option> </Select>
-                            </Form.Item> )}
-                            {/* Add hidden field to store unique ID for key prop */}
-                            <Form.Item {...restField} name={[name, 'id']} hidden noStyle initialValue={filterForm.getFieldValue(['conditions', name, 'id']) || Date.now() + index} ><Input /></Form.Item>
-                            <Form.Item {...restField} name={[name, 'column']} rules={[{ required: true, message: 'Column?' }]} >
-                                <Select placeholder="Select Column" style={{ width: 150 }} onChange={() => { /* Reset operator/value when column changes */ const conds = filterForm.getFieldValue('conditions'); if(conds && conds[index]) { conds[index].operator = undefined; conds[index].value = undefined; filterForm.setFieldsValue({ conditions: conds }); } }} >
-                                    {schema.filter(c => !['json', 'jsonb', 'bytea', 'blob'].some(t => c.type.toLowerCase().includes(t)) /* Exclude complex types from filter */).map(col => ( <Option key={col.name} value={col.name}>{col.name}</Option> ))}
-                                </Select>
-                            </Form.Item>
-                            <Form.Item noStyle shouldUpdate={(prev, cur) => prev.conditions?.[index]?.column !== cur.conditions?.[index]?.column } >
-                                {({ getFieldValue }) => {
-                                    const colName = getFieldValue(['conditions', index, 'column']);
-                                    const selCol = schema.find(c=>c.name===colName);
-                                    // Determine allowed operators based on column type (simple example)
-                                    const isNumeric = selCol && ['int', 'bigint', 'numeric', 'decimal', 'float', 'real', 'double'].some(t => selCol.type.toLowerCase().includes(t));
-                                    const isDate = selCol && ['date', 'timestamp'].some(t => selCol.type.toLowerCase().includes(t));
-                                    const isBoolean = selCol && ['bool'].some(t => selCol.type.toLowerCase().includes(t));
-                                    let ops = FILTER_OPERATORS;
-                                    if (isNumeric || isDate || isBoolean) { // For non-text types, remove LIKE/NOT LIKE
-                                        ops = ops.filter(op => op.value !== 'LIKE' && op.value !== 'NOT LIKE');
-                                    }
-                                    if (isBoolean) { // For boolean, maybe only allow Equals/Not Equals/Is Null/Is Not Null?
-                                        ops = ops.filter(op => ['=', '!=', 'IS NULL', 'IS NOT NULL'].includes(op.value));
-                                    }
+                             // Handle page number change (only if page wasn't reset by size change)
+                             if (!needsPageReset && page !== currentPage) {
+                                 setCurrentPage(page);
+                                 // Data fetch for the new page will be triggered by useEffect
+                             }
+                             // Optional: Reset frontend search/sort when changing page? Usually not desired.
+                             // setSearchQuery('');
+                             // setSortConfig({ field: null, order: null });
+                         }}
+                         showSizeChanger
+                         showQuickJumper
+                         pageSizeOptions={['10', '20', '50', '100']}
+                         // Show total based on backend count, range based on *displayed* data after frontend filtering/sorting
+                         showTotal={(total, range) => {
+                              // Range provided by AntD is based on page * pageSize, not displayed data count
+                              // Calculate displayed range based on frontend results
+                              const start = (currentPage - 1) * pageSize + 1;
+                              const end = start + displayedData.length - 1;
+                              const displayedCount = displayedData.length;
+                              if (total === 0) return '0 items';
+                              if (displayedCount === 0 && searchQuery) return `0 of ${total} items (filtered)`;
+                              if (displayedCount === 0) return `0 of ${total} items`;
+                              // Show range based on displayed items, indicate filtering if applicable
+                              const filterIndicator = (searchQuery || sortConfig.field) ? "(filtered/sorted)" : "";
+                              return `${start}-${end} of ${total} items ${filterIndicator}`;
+                          }}
+                         disabled={isLoading || editingKey !== '' || uploading}
+                     />
+                 )}
+            </div>
 
-                                    return ( <Form.Item {...restField} name={[name, 'operator']} rules={[{ required: true, message: 'Op?' }]} >
-                                        <Select placeholder="Operator" style={{ width: 180 }} disabled={!colName} onChange={() => { /* Reset value when operator changes */ const conds = filterForm.getFieldValue('conditions'); if(conds && conds[index]) { conds[index].value = undefined; filterForm.setFieldsValue({ conditions: conds }); } }} >
-                                            {ops.map(op => ( <Option key={op.value} value={op.value}>{op.label}</Option> ))}
-                                        </Select>
-                                    </Form.Item> );
-                                }}
-                            </Form.Item>
-                            {/* Value Input - depends on selected column and operator */}
-                            <Form.Item noStyle shouldUpdate={(prev, cur) =>
-                                prev.conditions?.[index]?.column !== cur.conditions?.[index]?.column ||
-                                prev.conditions?.[index]?.operator !== cur.conditions?.[index]?.operator
-                            }>
-                                {({ getFieldValue }) => {
-                                    const operator = getFieldValue(['conditions', index, 'operator']);
-                                    const needsValue = operator && !['IS NULL', 'IS NOT NULL'].includes(operator);
-                                    return ( <Form.Item
-                                        {...restField}
-                                        name={[name, 'value']}
-                                        rules={[{ required: needsValue, message: 'Value?' }]}
-                                    >
-                                        {/* Render input based on column type, disable if no value needed */}
-                                        {needsValue ? renderFilterValueInput(index) : <Input disabled placeholder="No value needed" style={{ width: 200 }}/>}
-                                    </Form.Item> );
-                                }}
-                            </Form.Item>
-                            <DeleteOutlined onClick={() => remove(name)} style={{ color: 'red', cursor: 'pointer', fontSize: '16px' }}/>
-                        </Space>
-                    ))}
-                    <Form.Item>
-                        <Button type="dashed" onClick={() => add({ id: Date.now(), logicalOperator: 'AND' })} block icon={<PlusOutlined />}> Add Filter Condition </Button>
-                    </Form.Item>
-                </> )}
-                </Form.List>
-            </Form>
-        </Modal> )}
 
-        {/* Upload Data Modal - Unchanged */}
-        <Modal
-            title={`Upload Data to ${tableName}`}
-            visible={isUploadModalVisible}
-            onCancel={handleUploadModalCancel}
-            footer={null} // Footer is not needed as Dragger has its own actions
-            destroyOnClose // Reset state when closed
-            maskClosable={false}
-        >
-            <Dragger
-                name="file" // Needs to match the key expected by the backend (used in customRequest)
-                multiple={false} // Allow only single file upload
-                accept={ACCEPTED_UPLOAD_TYPES.join(',')} // Accepted MIME types/extensions
-                customRequest={customUploadRequest} // Handle the upload logic
-                onChange={handleUploadChange} // Handle status changes (uploading, done, error)
-                beforeUpload={beforeUploadCheck} // Validate file before upload starts
-                disabled={uploading || !tableName || loadingData} // Also disable if loading data
-                style={{ padding: '20px' }}
-                height={200} // Set a fixed height for the drag area
-            >
-                <p className="ant-upload-drag-icon">
-                    <InboxOutlined />
-                </p>
-                <p className="ant-upload-text">Click or drag file to this area to upload</p>
-                <p className="ant-upload-hint">
-                    Supports single file upload. Strictly prohibited from uploading company data or other
-                    band files. Allowed types: {ACCEPTED_UPLOAD_EXTENSIONS_STRING}. Max size: 50MB.
-                </p>
-            </Dragger>
-            {uploading && <Spin tip="Uploading..." style={{ display: 'block', marginTop: '15px' }} />}
-        </Modal>
+            {/* --- Modals --- */}
 
-    </div> // End main div
+             {/* Add Row Modal */}
+             {isAddModalVisible && (
+                 <Modal
+                     title={`Add New Row to ${tableName}`}
+                     open={isAddModalVisible} // Use 'open' prop for newer AntD
+                     onOk={handleAddOk}
+                     confirmLoading={confirmLoadingAdd}
+                     onCancel={handleAddCancel}
+                     okText="Add Row"
+                     destroyOnClose // Reset form state when modal is closed
+                     maskClosable={false} // Prevent closing by clicking outside during add
+                     width={600}
+                 >
+                     <Form form={addForm} layout="vertical" name="add_row_form">
+                         {schema
+                             // Filter out the PK column ONLY if it's auto-generated (CodeB logic)
+                             .filter(col => !(col.isPrimaryKey && isPkAutoGenerated))
+                             .map(col => (
+                                 <Form.Item
+                                     key={`add-${col.name}`}
+                                     name={col.name}
+                                     label={`${col.name} (${col.type})`}
+                                     // Required rule only if not nullable AND has no default
+                                     // (PK auto-gen is already filtered out)
+                                     rules={[{ required: !col.isNullable && !col.hasDefault, message: `"${col.name}" is required` }]}
+                                     tooltip={!col.isNullable && !col.hasDefault ? "This field is required" : ""}
+                                 >
+                                     {renderFormInput(col)}
+                                 </Form.Item>
+                             ))}
+                     </Form>
+                 </Modal>
+             )}
 
-);
+             {/* Add Column Modal */}
+             {isAddColModalVisible && (
+                 <Modal
+                     title={`Add New Column to ${tableName}`}
+                     open={isAddColModalVisible}
+                     onOk={handleAddColOk}
+                     confirmLoading={confirmLoadingAddCol}
+                     onCancel={handleAddColCancel}
+                     okText="Add Column"
+                     destroyOnClose
+                     maskClosable={false}
+                 >
+                     <Form form={addColForm} layout="vertical" name="add_column_form" initialValues={{}}>
+                         <Form.Item
+                             name="columnName"
+                             label="Column Name"
+                             rules={[
+                                 { required: true, message: 'Column name is required' },
+                                 { pattern: /^[a-zA-Z_][a-zA-Z0-9_]*$/, message: 'Invalid name (letters, numbers, _, starting with letter or _)'},
+                                 { max: 63, message: 'Name too long (max 63 chars)' } // Example length limit
+                             ]}
+                         >
+                             <Input placeholder="e.g., email or user_status"/>
+                         </Form.Item>
+                         <Form.Item
+                             name="columnType"
+                             label="Column Type"
+                             rules={[{ required: true, message: 'Column type is required' }]}
+                         >
+                             <Select showSearch placeholder="Select data type" optionFilterProp="children" filterOption={(input, option) => (option?.children as unknown as string).toLowerCase().includes(input.toLowerCase())}>
+                                 {SUPPORTED_COLUMN_TYPES.map(type => ( <Option key={type} value={type}>{type}</Option> ))}
+                             </Select>
+                         </Form.Item>
+                         {/* TODO: Add optional fields like Nullable checkbox, Default value input if API supports */}
+                         {/* <Form.Item name="isNullable" valuePropName="checked" initialValue={true}>
+                             <Checkbox>Allow Null Values</Checkbox>
+                         </Form.Item>
+                         <Form.Item name="defaultValue" label="Default Value (optional)">
+                             <Input placeholder="e.g., CURRENT_TIMESTAMP or 'active'" />
+                         </Form.Item> */}
+                     </Form>
+                 </Modal>
+             )}
 
+             {/* Filter Modal (Backend Filters) */}
+             {isFilterModalVisible && (
+                 <Modal
+                     title="Apply Filters (Backend Operation)"
+                     open={isFilterModalVisible}
+                     onOk={handleFilterOk}
+                     onCancel={handleFilterCancel}
+                     okText="Apply Filters"
+                     width={850} // Wider modal for filters
+                     destroyOnClose
+                     maskClosable={false}
+                     footer={ // Custom footer for Clear button alignment
+                         <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+                             <Button danger onClick={handleClearFilters} disabled={filterConfig.length === 0}>Clear All Filters</Button>
+                             <Space>
+                                 <Button onClick={handleFilterCancel}>Cancel</Button>
+                                 <Button type="primary" onClick={handleFilterOk}>Apply Filters</Button>
+                             </Space>
+                         </Space>}
+                 >
+                     <Form form={filterForm} name="filter_form" autoComplete="off" layout="vertical">
+                         <Form.List name="conditions">
+                         {(fields, { add, remove }) => (
+                             <>
+                                 {fields.map(({ key, name, ...restField }, index) => (
+                                     <Space key={key} style={{ display: 'flex', marginBottom: 8, alignItems: 'baseline', flexWrap: 'nowrap' }} align="baseline">
+                                         {/* Logical Operator (AND/OR) between conditions */}
+                                         {index > 0 && (
+                                             <Form.Item
+                                                 {...restField}
+                                                 name={[name, 'logicalOperator']}
+                                                 initialValue="AND" // Default to AND
+                                                 rules={[{ required: true, message: 'AND/OR?' }]}
+                                                 style={{ width: 70, flexShrink: 0 }}
+                                             >
+                                                 <Select>
+                                                     <Option value="AND">AND</Option>
+                                                     <Option value="OR">OR</Option>
+                                                 </Select>
+                                             </Form.Item>
+                                         )}
+                                         {/* Hidden field to store unique ID for React key prop stability */}
+                                         <Form.Item {...restField} name={[name, 'id']} hidden noStyle initialValue={filterForm.getFieldValue(['conditions', name, 'id']) || Date.now() + index} ><Input /></Form.Item>
+
+                                         {/* Column Selection */}
+                                         <Form.Item
+                                             {...restField}
+                                             name={[name, 'column']}
+                                             rules={[{ required: true, message: 'Select column' }]}
+                                             style={{ width: 150, flexShrink: 0 }}
+                                         >
+                                             <Select
+                                                  showSearch
+                                                  placeholder="Select Column"
+                                                  optionFilterProp="children"
+                                                  filterOption={(input, option) => (option?.children as unknown as string).toLowerCase().includes(input.toLowerCase())}
+                                                  onChange={() => { /* Reset operator/value when column changes */
+                                                     const conditions = filterForm.getFieldValue('conditions');
+                                                     if(conditions && conditions[index]) {
+                                                         conditions[index].operator = undefined;
+                                                         conditions[index].value = undefined;
+                                                         filterForm.setFieldsValue({ conditions: conditions });
+                                                     }
+                                                 }}
+                                             >
+                                                 {/* Exclude complex types that are hard to filter reliably? Or allow all? */}
+                                                 {schema
+                                                      // .filter(c => !['json', 'jsonb', 'bytea', 'blob'].some(t => c.type.toLowerCase().includes(t)))
+                                                      .map(col => ( <Option key={col.name} value={col.name}>{col.name}</Option> ))}
+                                             </Select>
+                                         </Form.Item>
+
+                                         {/* Operator Selection (depends on selected column) */}
+                                         <Form.Item noStyle shouldUpdate={(prev, cur) => prev.conditions?.[index]?.column !== cur.conditions?.[index]?.column }>
+                                             {({ getFieldValue }) => {
+                                                 const colName = getFieldValue(['conditions', index, 'column']);
+                                                 const selCol = schema.find(c=>c.name===colName);
+                                                 // Determine allowed operators based on column type (simple example)
+                                                 const colTypeBase = selCol?.type.toLowerCase().split('(')[0].split(' ')[0];
+                                                 const numericTypesLC = ['numeric', 'integer', 'int', 'bigint', 'smallint', 'float', 'double', 'decimal', 'real', 'serial', 'bigserial'];
+                                                 const dateTypesLC = ['date', 'timestamp', 'datetime', 'timestamptz'];
+                                                 const booleanTypesLC = ['boolean', 'bool'];
+
+                                                 let applicableOperators = [...FILTER_OPERATORS];
+                                                 if (selCol) {
+                                                     if (numericTypesLC.includes(colTypeBase || '') || dateTypesLC.includes(colTypeBase || '')) {
+                                                         // For numbers/dates, remove LIKE/NOT LIKE
+                                                         applicableOperators = applicableOperators.filter(op => op.value !== 'LIKE' && op.value !== 'NOT LIKE');
+                                                     }
+                                                     if (booleanTypesLC.includes(colTypeBase || '')) {
+                                                         // For boolean, maybe only allow Equals/Not Equals/Is Null/Is Not Null?
+                                                         applicableOperators = applicableOperators.filter(op => ['=', '!=', 'IS NULL', 'IS NOT NULL'].includes(op.value));
+                                                     }
+                                                     // Could add more specific rules for text, etc.
+                                                 }
+
+
+                                                 return (
+                                                     <Form.Item
+                                                         {...restField}
+                                                         name={[name, 'operator']}
+                                                         rules={[{ required: true, message: 'Select operator' }]}
+                                                          style={{ width: 180, flexShrink: 0 }}
+                                                     >
+                                                         <Select
+                                                             placeholder="Operator"
+                                                             disabled={!colName} // Disable if no column selected
+                                                             onChange={() => { /* Reset value when operator changes */
+                                                                 const conditions = filterForm.getFieldValue('conditions');
+                                                                 if(conditions && conditions[index]) {
+                                                                     conditions[index].value = undefined;
+                                                                     filterForm.setFieldsValue({ conditions: conditions });
+                                                                 }
+                                                             }}
+                                                         >
+                                                             {applicableOperators.map(op => ( <Option key={op.value} value={op.value}>{op.label}</Option> ))}
+                                                         </Select>
+                                                     </Form.Item>
+                                                 );
+                                             }}
+                                         </Form.Item>
+
+                                         {/* Value Input (depends on selected column and operator) */}
+                                         <Form.Item noStyle shouldUpdate={(prev, cur) =>
+                                             prev.conditions?.[index]?.column !== cur.conditions?.[index]?.column ||
+                                             prev.conditions?.[index]?.operator !== cur.conditions?.[index]?.operator
+                                         }>
+                                             {({ getFieldValue }) => {
+                                                 const operator = getFieldValue(['conditions', index, 'operator']);
+                                                 const needsValue = operator && !['IS NULL', 'IS NOT NULL'].includes(operator);
+                                                 return (
+                                                     <Form.Item
+                                                         {...restField}
+                                                         name={[name, 'value']}
+                                                         rules={[{ required: needsValue, message: 'Value required' }]}
+                                                          style={{ minWidth: 200, flexGrow: 1 }} // Allow value field to grow
+                                                     >
+                                                         {/* Render input based on column type, disable if no value needed */}
+                                                         {needsValue ? renderFilterValueInput(index) : <Input disabled placeholder="No value needed" style={{ width: 200 }}/>}
+                                                     </Form.Item>
+                                                 );
+                                             }}
+                                         </Form.Item>
+
+                                         {/* Remove Button */}
+                                         <DeleteOutlined
+                                             onClick={() => remove(name)}
+                                             style={{ color: 'red', cursor: 'pointer', fontSize: '16px', marginLeft: '8px' }}
+                                             title="Remove this filter condition"
+                                         />
+                                     </Space>
+                                 ))}
+
+                                 {/* Add Filter Button */}
+                                 <Form.Item style={{ marginTop: '10px' }}>
+                                     <Button type="dashed" onClick={() => add({ id: Date.now(), logicalOperator: 'AND' })} block icon={<PlusOutlined />}>
+                                         Add Filter Condition
+                                     </Button>
+                                 </Form.Item>
+                             </>
+                         )}
+                         </Form.List>
+                     </Form>
+                 </Modal>
+             )}
+
+             {/* Upload Data Modal */}
+             <Modal
+                title={`Upload Data to ${tableName}`}
+                open={isUploadModalVisible} // Use 'open' prop
+                onCancel={handleUploadModalCancel}
+                footer={null} // Footer is not needed as Dragger has its own actions/status
+                destroyOnClose // Reset state when closed
+                maskClosable={false} // Prevent closing during potential upload
+             >
+                 <Spin spinning={uploading} tip="Processing upload...">
+                     <Dragger
+                         name="file" // Needs to match the key expected by the backend (used in customRequest)
+                         multiple={false} // Allow only single file upload
+                         accept={ACCEPTED_UPLOAD_TYPES.join(',')} // Accepted MIME types/extensions
+                         customRequest={customUploadRequest} // Handle the upload logic
+                         onChange={handleUploadChange} // Handle status changes (uploading, done, error)
+                         beforeUpload={beforeUploadCheck} // Validate file before upload starts
+                         disabled={uploading || !tableName || isLoading} // Disable if loading schema/data or already uploading
+                         style={{ padding: '20px' }}
+                         height={200} // Set a fixed height for the drag area
+                     >
+                         <p className="ant-upload-drag-icon">
+                             <InboxOutlined />
+                         </p>
+                         <p className="ant-upload-text">Click or drag file to this area to upload</p>
+                         <p className="ant-upload-hint">
+                             Supports single file upload. Allowed types: {ACCEPTED_UPLOAD_EXTENSIONS_STRING}. Max size: 50MB. Ensure column headers in the file match table columns.
+                         </p>
+                     </Dragger>
+                 </Spin>
+                 {/* Optional: Show progress bar separately if needed */}
+                 {/* {uploading && <Progress percent={uploadProgress} status="active" />} */}
+             </Modal>
+
+        </div> // End main container div
+    );
 };
 
 export default DataGrid;

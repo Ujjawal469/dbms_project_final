@@ -1,12 +1,6 @@
 DROP TABLE IF EXISTS Users CASCADE;
-DROP TABLE IF EXISTS  Users_tables CASCADE;
-DROP TABLE IF EXISTS Products CASCADE;
-DROP TABLE IF EXISTS Orders CASCADE;
-DROP TABLE IF EXISTS OrderItems CASCADE;
-DROP TABLE IF EXISTS Cart CASCADE;
-DROP TABLE IF EXISTS OrderAddress CASCADE;
-DROP TABLE IF EXISTS table1 CASCADE;
-DROP TABLE IF EXISTS new_table2 CASCADE;
+DROP TABLE IF EXISTS  Users_Database CASCADE;
+DROP TABLE IF EXISTS Users_Database_tables CASCADE;
 
 CREATE TABLE Users (
     user_id SERIAL PRIMARY KEY,
@@ -15,9 +9,19 @@ CREATE TABLE Users (
     password_hash TEXT NOT NULL
 );
 
-CREATE TABLE Users_tables (
+CREATE TABLE Users_Database (
     user_id INT NOT NULL,
-    table_name VARCHAR(200) NOT NULL,
-    PRIMARY KEY (user_id, table_name),
+    db_id INT NOT NULL,
+    db_name VARCHAR(200) NOT NULL,
+    PRIMARY KEY (user_id, db_id),
     FOREIGN KEY (user_id) REFERENCES Users(user_id) ON DELETE CASCADE
+);
+
+CREATE TABLE Users_Database_tables (
+    user_id INT NOT NULL,
+    db_id INT NOT NULL,
+    table_id INT NOT NULL,
+    table_name VARCHAR(200) NOT NULL,
+    PRIMARY KEY (user_id, db_id, table_id),
+    FOREIGN KEY (user_id, db_id) REFERENCES Users_Database(user_id, db_id) ON DELETE CASCADE
 );

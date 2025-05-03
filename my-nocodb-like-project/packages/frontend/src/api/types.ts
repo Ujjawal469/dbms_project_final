@@ -58,3 +58,40 @@ export interface ApiColumnSchema {
   value?: any;
   logicalOperator?: 'AND' | 'OR'; // Operator connecting this condition to the NEXT one
   }
+
+  
+export interface ApiDatabase {
+  user_id: number;
+  db_id: number;
+  db_name: string;
+}
+
+export interface ApiTableInfo {
+  table_id: number;
+  table_name: string;
+  
+}
+
+export interface AddTableResponse {
+  message: string;
+  table: ApiTableInfo & { user_id: number; db_id: number }; 
+  physicalName?: string;
+}
+
+
+export interface RenameTableResponse {
+   message: string;
+   table: ApiTableInfo & { user_id: number; db_id: number };
+}
+
+
+export interface AddDatabaseResponse {
+   message: string;
+   database: ApiDatabase;
+}
+
+
+export interface RenameDatabaseResponse {
+   message: string;
+   database: ApiDatabase;
+}

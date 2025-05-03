@@ -3,11 +3,15 @@ import * as metaController from '../controllers/meta.controller'; // Assuming co
 
 const router = express.Router();
 
-router.get('/tables', metaController.listTables);
-router.post('/tables', metaController.addTable);
-router.get('/tables/:tableName/schema', metaController.getSchemaForTable);
-router.post('/tables/:tableName/columns', metaController.addColumnToTable);
-router.delete('/tables/:tableName', metaController.deleteTable);
-router.patch('/tables/:oldTableName', metaController.renameTable);
+router.get('/databases', metaController.getDatabases);             
+router.post('/databases', metaController.createDatabase);           
+router.patch('/databases/:dbId', metaController.renameUserDatabase); 
+router.delete('/databases/:dbId', metaController.deleteUserDatabase); 
+router.get('/databases/:dbId/tables', metaController.listTables);                    
+router.post('/databases/:dbId/tables', metaController.addTable);                     
+router.get('/databases/:dbId/tables/:tableName/schema', metaController.getSchemaForTable); 
+router.post('/databases/:dbId/tables/:tableName/columns', metaController.addColumnToTable); 
+router.delete('/databases/:dbId/tables/:tableName', metaController.deleteTable);       
+router.patch('/databases/:dbId/tables/:oldTableName', metaController.renameTable);     
 
 export default router;
