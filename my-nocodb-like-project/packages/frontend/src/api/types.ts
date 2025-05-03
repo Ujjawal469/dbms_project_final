@@ -50,3 +50,11 @@ export interface ApiColumnSchema {
     username: string; 
     email: string;
   }
+
+  export interface FilterCondition{
+  id: number; // Unique ID for React key prop
+  column?: string;
+  operator?: string;
+  value?: any;
+  logicalOperator?: 'AND' | 'OR'; // Operator connecting this condition to the NEXT one
+  }

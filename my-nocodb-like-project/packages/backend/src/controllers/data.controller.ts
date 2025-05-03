@@ -157,3 +157,32 @@ export const deleteExistingRow = async (req: Request, res: Response) => {
         res.status(500).json({ message: error.message || 'Internal server error while deleting row.' });
     }
 };
+
+
+export const uploadTableData = async (req: Request, res: Response) => {
+    try {
+        const userId = req.session?.userId;
+        if (!userId) {
+             return res.status(401).json({ message: 'Unauthorized. Please log in.' });
+        }
+        const { tableName } = req.params;
+        const file = req.file;
+        console.log(`file obtained: ${file}`);
+
+        if (!tableName) {
+            return res.status(400).json({ message: 'Table name parameter is required.' });
+        }
+        if (!file) {
+            return res.status(400).json({ message: 'No file uploaded or file rejected by filter.' });
+        }
+        const finalTableName = tableName + "_" + userId;
+        console.log(`Upload request received for table: ${finalTableName}, file: ${file.originalname}, size: ${file.size}`);
+        const result = await dataService.processCsvUpload(finalTableName, file.buffer);
+        res.status(result.tableCreated ? 201 : 200).json(result);
+
+    } catch (error: any) {
+        console.error(`Error processing upload for table ${req.params.tableName}:`, error);
+        res.status(error.message?.includes("Schema mismatch") || error.message?.includes("Invalid file type") || error.message?.includes("CSV headers") ? 400 : 500)
+           .json({ message: error.message || 'Internal server error during file upload processing.' });
+    }
+};

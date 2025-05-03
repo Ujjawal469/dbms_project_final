@@ -31,8 +31,7 @@ interface SortConfig {
     order: SortOrder | null;
 }
 
-// Define Filter Condition structure
-interface FilterCondition {
+interface FilterCondition{
     id: number; // Unique ID for React key prop
     column?: string;
     operator?: string;

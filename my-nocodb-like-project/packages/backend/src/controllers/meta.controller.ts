@@ -1,6 +1,6 @@
 // src/controllers/meta.controller.ts
 
-import { Request, Response } from 'express';
+import { Request, Response, NextFunction } from 'express';
 import * as metaService from '../services/meta.service';
 
 

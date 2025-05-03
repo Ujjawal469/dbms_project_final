@@ -1,13 +1,14 @@
 // src/api/index.ts
 
-import axios, { AxiosError } from 'axios';
+import axios, { AxiosError, AxiosProgressEvent } from 'axios';
 import {
   ApiColumnSchema,
   ApiFetchDataResponse,
   NewColumnPayload,
   LoginCredentials,
   SignupCredentials,
-  LoggedInUser
+  LoggedInUser,
+  FilterCondition,
 } from './types';
 
 // ------------------------------ API Base URL Setup from .env ---------------------------------
@@ -368,4 +369,32 @@ export const logoutUser = async (): Promise<void> => {
   }
 };
 
-//----------------------------- filter  table------------------------------------------------
+//--------------------------- uploadData ----------------------------------------------------
+export const uploadData = async (
+  tableName: string,
+  formData: FormData,
+  onUploadProgress?: (progressEvent: AxiosProgressEvent) => void
+): Promise<any> => {
+  if (!tableName) {
+    throw new Error("Table name is required for uploading data.");
+  }
+  if (!formData.has('file')) {
+     throw new Error("FormData must contain a 'file' entry.");
+  }
+
+  try {
+    console.log(`API: Uploading data for table "${tableName}"...`);
+    const response = await apiClient.post<any>(
+      `/data/tables/${tableName}/upload`,
+      formData,
+      {
+        withCredentials: true,
+        onUploadProgress: onUploadProgress
+      }
+    );
+    console.log(`API: Data upload for "${tableName}" successful.`);
+    return response.data;
+  } catch (err) {
+    throw handleApiError(err as AxiosError | Error, `uploadData(${tableName})`);
+  }
+};

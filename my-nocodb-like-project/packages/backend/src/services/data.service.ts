@@ -1,6 +1,8 @@
 import { prisma } from '../config/db';
 import { Prisma } from '@prisma/client';
 import * as metaService from './meta.service'; // Used for schema validation
+import csvParser from 'csv-parser';
+import stream from 'stream';
 
 // Assuming FilterCondition is defined here or imported
 interface FilterCondition {
@@ -402,5 +404,159 @@ export const deleteRow = async (
            throw new Error(`Cannot delete row from "${tableName}" because it is referenced by other records (foreign key constraint). DB Error: ${error.message}`);
        }
        throw new Error(`Could not delete record from table "${tableName}". Original error: ${error.message || error}`);
+  }
+};
+
+//--------------------------------------- Process CSV Upload ----------------------------------
+export const processCsvUpload = async (
+  tableName: string,
+  fileBuffer: Buffer
+): Promise<{ message: string; rowsProcessed: number; tableCreated: boolean }> => {
+  console.log(`Processing CSV upload for table: ${tableName}`);
+
+  if (!/^[a-zA-Z0-9_]+$/.test(tableName)) {
+      throw new Error(`Invalid table name format: ${tableName}`);
+  }
+  const safeTableName = `"${tableName}"`;
+
+  const csvData: any[] = [];
+  let csvHeaders: string[] = [];
+  let sanitizedHeaders: string[] = [];
+
+  // --- 1. Parse CSV from Buffer ---
+  try {
+      await new Promise((resolve, reject) => {
+          const bufferStream = new stream.PassThrough();
+          bufferStream.end(fileBuffer);
+
+          bufferStream
+              .pipe(csvParser())
+              .on('headers', (headers: string[]) => {
+                  console.log('CSV Headers Raw:', headers);
+                  if (!headers || headers.length === 0 || headers.some(h => !h || h.trim() === '')) {
+                      return reject(new Error("CSV headers are invalid or empty."));
+                  }
+                  csvHeaders = headers;
+                  sanitizedHeaders = headers.map(h =>
+                      h.trim().toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '')
+                  );
+                   sanitizedHeaders = sanitizedHeaders.map(h => /^[a-z_]/.test(h) ? h : `_${h}`);
+                  const headerSet = new Set(sanitizedHeaders);
+                  if (headerSet.size !== sanitizedHeaders.length) {
+                      return reject(new Error("CSV contains duplicate header names after sanitization."));
+                  }
+                  console.log('CSV Headers Sanitized:', sanitizedHeaders);
+              })
+              .on('data', (data) => {
+                  const row: Record<string, any> = {};
+                  sanitizedHeaders.forEach((sHeader, index) => {
+                      const originalHeader = csvHeaders[index];
+                      row[sHeader] = data[originalHeader] ?? null;
+                  });
+                  csvData.push(row);
+              })
+              .on('end', () => {
+                  if (sanitizedHeaders.length === 0) {
+                       return reject(new Error("No valid headers found in CSV file."));
+                  }
+                  console.log(`CSV Parsed successfully: ${csvData.length} data rows.`);
+                  resolve(true);
+              })
+              .on('error', (error) => {
+                  console.error("CSV Parsing Error:", error);
+                  reject(new Error(`Failed to parse CSV file: ${error.message}`));
+              });
+      });
+  } catch (parseError: any) {
+      // Catch errors specifically from the parsing promise
+      throw parseError;
+  }
+
+  // --- 2. Database Operations (within a transaction) ---
+  let tableCreated = false;
+  try {
+      await prisma.$executeRawUnsafe(`BEGIN`);
+
+      // Check if table exists
+      const checkTableQuery = `
+          SELECT EXISTS (
+              SELECT FROM information_schema.tables
+              WHERE table_schema = 'public' AND table_name = $1
+          );`;
+      const tableExistsResult = await prisma.$queryRawUnsafe<{ exists: boolean }[]>(checkTableQuery, tableName);
+      const tableExists = tableExistsResult[0]?.exists ?? false;
+
+      if (tableExists) {
+          console.log(`Table '${tableName}' exists. Replacing data.`);
+          tableCreated = false;
+
+           // ** Optional: Schema Validation **
+           const existingSchema = await metaService.getTableSchema(tableName);
+           const existingCols = new Set(existingSchema.map(c => c.name.toLowerCase()));
+           const missingInDb = sanitizedHeaders.filter(h => !existingCols.has(h));
+           if (missingInDb.length > 0) {
+               await prisma.$executeRawUnsafe(`ROLLBACK`);
+               throw new Error(`Schema mismatch: CSV header(s) '${missingInDb.join(', ')}' not found in existing table '${tableName}'.`);
+           }
+          console.log(`Deleting existing data from ${safeTableName}...`);
+          await prisma.$executeRawUnsafe(`DELETE FROM ${safeTableName}`);
+
+      } else {
+          console.log(`Table '${tableName}' does not exist. Creating table.`);
+          tableCreated = true;
+
+          // ** IMPORTANT: Sanitize/Quote column names **
+          const createColumns = sanitizedHeaders.map(h => `"${h}" TEXT`).join(', ');
+          const createTableQuery = `CREATE TABLE ${safeTableName} (${createColumns})`;
+          console.log("Executing Create Table:", createTableQuery);
+          await prisma.$executeRawUnsafe(createTableQuery);
+      }
+      if (csvData.length > 0) {
+          console.log(`Inserting ${csvData.length} new rows into ${safeTableName}...`);
+          // ** IMPORTANT: Sanitize/Quote column names **
+          const columnList = sanitizedHeaders.map(h => `"${h}"`).join(', ');
+          const valuePlaceholders: string[] = [];
+          const allValues: any[] = [];
+          let paramCounter = 1;
+
+          csvData.forEach(row => {
+              const rowPlaceholders: string[] = [];
+              sanitizedHeaders.forEach(header => {
+                  rowPlaceholders.push(`$${paramCounter++}`);
+                  allValues.push(row[header] ?? null); // Ensure value exists, default to null
+              });
+              valuePlaceholders.push(`(${rowPlaceholders.join(', ')})`);
+          });
+
+          if (valuePlaceholders.length > 0) {
+              const insertSql = `INSERT INTO ${safeTableName} (${columnList}) VALUES ${valuePlaceholders.join(', ')}`;
+               console.log(`Executing Insert SQL with ${allValues.length} parameters.`);
+              await prisma.$executeRawUnsafe(insertSql, ...allValues);
+          }
+      }
+
+      await prisma.$executeRawUnsafe(`COMMIT`); // Commit transaction
+
+      const message = tableCreated
+          ? `Successfully created table '${tableName}' and imported ${csvData.length} rows.`
+          : `Successfully replaced data in table '${tableName}' with ${csvData.length} rows.`;
+
+      return { message, rowsProcessed: csvData.length, tableCreated };
+
+  } catch (dbError: any) {
+      console.error(`Database operation failed during CSV processing for ${tableName}:`, dbError);
+      try {
+          await prisma.$executeRawUnsafe(`ROLLBACK`);
+          console.log("Transaction rolled back.");
+      } catch (rollbackError) {
+          console.error("Failed to rollback transaction:", rollbackError);
+      }
+      if (dbError.code === '42P07') { // Table already exists (Postgres code) - should be handled by check, but good fallback
+           throw new Error(`Table "${tableName}" already exists (concurrent creation?).`);
+      }
+       if (dbError.code === '42701') { // Duplicate column (Postgres code) - indicates issue with sanitized headers
+           throw new Error(`Duplicate column name detected during table creation for "${tableName}". Check sanitized CSV headers.`);
+       }
+      throw new Error(`Database operation failed: ${dbError.message}`);
   }
 };
