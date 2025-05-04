@@ -637,7 +637,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                     </span>
                 ) : <UserOutlined style={{ fontSize: '16px', color: '#bfbfbf' }} />}
                 <span style={{ fontWeight: 'bold', fontSize: '14px', color: '#333', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {loadingUser ? 'Loading...' : (currentUser ? `Hi, ${currentUser.username}` : 'Not logged in')}
+                    {loadingUser ? 'Loading...' : (currentUser ? `Hi, ${currentUser.username.slice(0,-1)}` : 'Not logged in')}
                 </span>
             </div>
 

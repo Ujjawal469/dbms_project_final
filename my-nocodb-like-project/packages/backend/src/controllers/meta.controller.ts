@@ -78,6 +78,30 @@ export const getDatabases = async (req: Request, res: Response, next: NextFuncti
     }
 };
 
+export const getDatabaseName = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const userId = req.session?.userId;
+        if (!userId) {
+            console.warn('CONTROLLER: Attempt to get database name without authentication.');
+            return res.status(401).json({ message: 'Unauthorized. Please log in.' });
+        }
+        const dbId = parseInt(req.params.dbId, 10);
+        if (isNaN(dbId)) {
+            return res.status(400).json({ message: 'Invalid Database ID.' });
+        }
+        console.log(`CONTROLLER: Getting database name for User ${userId}, DB ID ${dbId}`);
+        const database = await metaService.getDbName(userId, dbId);
+        if (!database) {
+            return res.status(404).json({ message: 'Database not found.' });
+        }
+        console.log(`CONTROLLER: Database ID ${dbId} found for User ${userId}: "${database.db_name}"`);
+        res.status(200).json(database.db_name);
+    } catch (error: any) {
+        console.error(`CONTROLLER ERROR (getDatabaseName):`, error);
+        next(error);
+    }
+};
+
 export const renameUserDatabase = async (req: Request, res: Response, next: NextFunction) => {
     try {
         const userId = req.session?.userId;

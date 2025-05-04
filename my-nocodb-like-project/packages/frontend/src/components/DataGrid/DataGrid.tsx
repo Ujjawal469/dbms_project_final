@@ -127,7 +127,11 @@ const DataGrid: React.FC<DataGridProps> = ({ dbId, tableName }) => {
 
     
     const [uploading, setUploading] = useState(false);
-    const [isUploadModalVisible, setIsUploadModalVisible] = useState(false); 
+    const [isUploadModalVisible, setIsUploadModalVisible] = useState(false);
+    
+    const [databaseName, setDatabaseName] = useState<string | null>(null);
+    const [loadingDbName, setLoadingDbName] = useState<boolean>(false);
+    const [dbNameError, setDbNameError] = useState<string | null>(null);
 
     
     const debouncedSearch = useCallback(
@@ -273,6 +277,50 @@ const DataGrid: React.FC<DataGridProps> = ({ dbId, tableName }) => {
         refetchTrigger, 
         generateRowKey  
     ]);
+
+    useEffect(() => {
+        
+        if (dbId === null || dbId === undefined || isNaN(dbId)) {
+            setDatabaseName('Invalid DB ID');
+            setLoadingDbName(false);
+            setDbNameError(null);
+            return;
+        }
+    
+        let isMounted = true; 
+        setLoadingDbName(true);
+        setDbNameError(null);
+        setDatabaseName(null); 
+    
+        const fetchName = async () => {
+            console.log(`DataGrid Title: Attempting to fetch name for dbId: ${dbId}`);
+            try {
+                console.log(`DataGrid Title: Fetching name with effective dbId: ${dbId}`); 
+                const name = await api.getDatabaseName(dbId);
+                if (isMounted) {
+                    console.log(`DataGrid Title: Successfully fetched name: ${name}`);
+                    setDatabaseName(name);
+                }
+            } catch (error: any) {
+                console.error("DataGrid Title: Error fetching database name:", error);
+                if (isMounted) {
+                    setDatabaseName('Error'); 
+                    setDbNameError(error instanceof Error ? error.message : 'Failed to load DB name');
+                }
+            } finally {
+                if (isMounted) {
+                    setLoadingDbName(false);
+                }
+            }
+        };
+    
+        fetchName();
+    
+        
+        return () => {
+            isMounted = false;
+        };
+    }, [dbId]);
 
 
     
@@ -1329,7 +1377,16 @@ const DataGrid: React.FC<DataGridProps> = ({ dbId, tableName }) => {
             {/* Header Area */}
             <div style={{ marginBottom: '10px', flexShrink: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
                  <Title level={4} style={{ margin: 0, flexGrow: 1, minWidth: '200px' }}>
-                     {`DB: ${dbId} / Table: ${tableName}`}
+                 DB:{' '}
+                {loadingDbName ? (
+                    <Spin size="small" style={{ marginRight: '5px' }}/>
+                ) : dbNameError ? (
+                    <Tooltip title={dbNameError}><Text type="danger">Error</Text></Tooltip>
+                ) : (
+                    <Text strong>{databaseName || `ID ${dbId}`}</Text> 
+                )}
+                {' / Table: '}
+                <Text strong>{tableName || 'Select Table'}</Text>
                      {loadingSchema && <Spin size="small" style={{ marginLeft: '10px' }} />}
                  </Title>
                     {schema.length > 0 && !loadingSchema && (

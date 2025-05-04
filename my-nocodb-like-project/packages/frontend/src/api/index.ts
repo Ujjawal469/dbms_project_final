@@ -131,6 +131,23 @@ export const fetchDatabases = async (): Promise<ApiDatabase[]> => {
     }
 };
 
+
+export const getDatabaseName = async (dbId: number): Promise<string> => {
+    if (!dbId) throw new Error("Database ID is required.");
+    console.log(`API: Fetching name for database ID ${dbId}...`);
+    const res = await apiClient.get<{ dbName: string }>(`/meta/databases/${dbId}`);
+    console.log(res);
+    console.log(res.data);
+    console.log("API Response data:", res.data);
+    if (res.data && typeof res.data === 'string') {
+        console.log(`API: Database name for ID ${dbId} is "${res.data}".`);
+        return res.data;
+    } else {
+        console.error(`API: Unexpected response data type or empty value for ID ${dbId}:`, res.data);
+        throw new Error(`Failed to fetch or parse database name for ID ${dbId}.`);
+    }
+};
+
 export const addDatabase = async (dbName: string): Promise<AddDatabaseResponse> => {
     if (!dbName || dbName.trim().length === 0) throw new Error("Database name cannot be empty.");
     try {

@@ -100,6 +100,30 @@ export const getPhysicalTableName = (baseTableName: string, userId: number, dbId
 };
 
 
+export const getDbName = async (userId: number, dbId: number): Promise<Prisma.users_databaseGetPayload<{}>> => {
+    console.log(`SERVICE: Fetching database name for User ID ${userId}, DB ID ${dbId}`);
+    try {
+        const db = await prisma.users_database.findUnique({
+            where: {
+                user_id_db_id: {
+                    user_id: userId,
+                    db_id: dbId,
+                },
+            },
+        });
+        if (!db) {
+            const error = new Error(`Database with ID ${dbId} not found for user ${userId}.`);
+            (error as any).statusCode = 404;
+            throw error;
+        }
+        console.log(`SERVICE: Found database entry: User ${userId}, DB ID ${dbId}, Name "${db.db_name}"`);
+        return db;
+    } catch (error) {
+        console.error(`SERVICE ERROR (getDbName): User ${userId}, DB ID ${dbId}`, error);
+        throw new Error("Could not fetch database name.");
+    }
+}
+
 // --- Database Management Functions (from Commit 2, slightly adapted) ---
 
 export const addDatabase = async (userId: number, rawDbName: string): Promise<Prisma.users_databaseGetPayload<{}>> => {
