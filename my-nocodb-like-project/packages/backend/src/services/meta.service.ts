@@ -796,3 +796,103 @@ export const renameTableAndAssociation = async (userId: number, dbId: number, ol
         throw new Error(`Could not rename table "${oldBaseTableName}" to "${newBaseTableName}". An error occurred: ${error.message}`);
     }
 };
+
+
+
+export const deleteTableColumn = async (
+    userId: number,
+    dbId: number,
+    baseTableName: string,
+    columnName: string
+): Promise<void> => {
+
+    const physicalTableName = getPhysicalTableName(baseTableName, userId, dbId);
+    // Use proper quoting for table and column names in raw SQL
+    const safePhysicalTableName = `"${physicalTableName}"`;
+    const safeColumnName = `"${columnName}"`;
+
+    console.log(`SERVICE: Validating request to delete column ${safeColumnName} from physical table ${safePhysicalTableName}`);
+
+    // --- Validation ---
+    // You might need a dedicated connection/transaction for these checks depending on your DB client setup
+
+    // 1. Check if Table Exists (and user has access - implicitly checked by getPhysicalTableName potentially)
+    try {
+        // Use information_schema for portability
+        const tableCheck = await prisma.$queryRawUnsafe<Array<{ exists: boolean }>>(
+            `SELECT EXISTS (
+                SELECT 1 FROM information_schema.tables
+                WHERE table_schema = 'public' -- Adjust schema if needed
+                AND table_name = $1
+            );`,
+            physicalTableName // Use unquoted name for parameter binding
+        );
+        if (!tableCheck || !tableCheck[0]?.exists) {
+            console.error(`Table "${baseTableName}" (physical: ${physicalTableName}) not found.`, 404);
+        }
+    } catch(err: any) {
+        // Handle potential query errors during check
+        console.error(`SERVICE ERROR: Failed to check existence of table ${physicalTableName}`, err);
+        console.error(`Failed to verify table "${baseTableName}" existence.`, 500);
+    }
+
+
+    // 2. Check if Column Exists
+    let isPrimaryKey = false;
+    try {
+        const columnCheck = await prisma.$queryRawUnsafe<Array<{ column_name: string, is_primary_key: string | null }>>(
+            `SELECT
+                col.column_name,
+                kcu.constraint_name AS is_primary_key
+            FROM information_schema.columns col
+            LEFT JOIN information_schema.key_column_usage kcu
+                ON col.table_schema = kcu.table_schema
+                AND col.table_name = kcu.table_name
+                AND col.column_name = kcu.column_name
+            LEFT JOIN information_schema.table_constraints tc
+                ON kcu.constraint_name = tc.constraint_name
+                AND kcu.table_schema = tc.table_schema
+                AND kcu.table_name = tc.table_name
+                AND tc.constraint_type = 'PRIMARY KEY'
+            WHERE col.table_schema = 'public' -- Adjust schema if needed
+            AND col.table_name = $1
+            AND col.column_name = $2;`,
+            physicalTableName, // Use unquoted names for parameter binding
+            columnName
+        );
+
+        if (!columnCheck || columnCheck.length === 0) {
+            console.error(`Column "${columnName}" not found in table "${baseTableName}".`, 404);
+        }
+        // Check if the column is part of a primary key constraint
+        isPrimaryKey = !!columnCheck[0].is_primary_key;
+
+    } catch(err: any) {
+        console.error(`SERVICE ERROR: Failed to check existence/PK status of column ${columnName} in ${physicalTableName}`, err);
+        console.error(`Failed to verify column "${columnName}" existence.`, 500);
+    }
+
+    try {
+        console.log(`SERVICE: Executing ALTER TABLE ${safePhysicalTableName} DROP COLUMN ${safeColumnName}`);
+
+        // Use $executeRawUnsafe as table/column names are dynamic but validated/quoted
+        await prisma.$executeRawUnsafe(`ALTER TABLE ${safePhysicalTableName} DROP COLUMN ${safeColumnName}`);
+
+        console.log(`SERVICE: Column ${safeColumnName} successfully dropped from ${safePhysicalTableName}`);
+
+        // --- Optional: Update your application's metadata ---
+        // If you store column definitions separately (e.g., in Users_database_table_columns)
+        // you should delete the corresponding metadata entry here *after* the physical drop succeeds.
+        // await deleteColumnMetadata(userId, dbId, baseTableName, columnName);
+
+    } catch (dbError: any) {
+        console.error(`SERVICE ERROR: Failed to drop column ${safeColumnName} from ${safePhysicalTableName}`, dbError);
+        // Check for specific DB errors if needed (e.g., column involved in constraints/dependencies)
+        if (dbError.code === '42703') { // PostgreSQL: column does not exist (should have been caught above, but belt-and-braces)
+            console.error(`Column "${columnName}" could not be found during delete operation.`, 404);
+        }
+        // Add checks for errors related to dependencies (foreign keys, indexes) if necessary
+        // E.g., PostgreSQL might return 2BP01 (dependent objects exist) - consider using DROP COLUMN ... CASCADE with caution
+        console.error(`Database error while deleting column "${columnName}": ${dbError.message || 'Unknown DB error'}`, 500);
+    }
+};

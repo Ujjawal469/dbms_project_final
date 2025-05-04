@@ -8,7 +8,7 @@ import {
     FilterOutlined, SearchOutlined, UploadOutlined, GroupOutlined, ClearOutlined, DownOutlined, PlusOutlined, DeleteOutlined, InboxOutlined
 } from '@ant-design/icons';
 import { ApiColumnSchema, NewColumnPayload } from '../../api/types';
-import type { UploadFile, UploadProps, RcFile } from 'antd';
+import { UploadFile, UploadProps, RcFile } from 'antd';
 import dayjs from 'dayjs';
 import { debounce } from 'lodash';
 
@@ -17,7 +17,7 @@ interface FetchParams {
     page: number;
     limit: number;
     filters?: FilterCondition[];
-    group_by?: string | null; 
+    group_by?: string[];
     // Backend search/sort could be added here if needed in the future
     // search?: string;
     // sort_by?: string;
@@ -126,7 +126,8 @@ const DataGrid: React.FC<DataGridProps> = ({ dbId, tableName }) => {
     const [filterForm] = Form.useForm(); 
 
     
-    const [groupingColumn, setGroupingColumn] = useState<string | null>(null);
+    const [groupingColumn, setGroupingColumn] = useState<string[]>([]);
+    const [IsGroupModalVisible, setIsGroupModalVisible] = useState(false);
 
     
     const [uploading, setUploading] = useState(false);
@@ -162,7 +163,7 @@ const DataGrid: React.FC<DataGridProps> = ({ dbId, tableName }) => {
             setCurrentPage(1); setPageSize(20); setTotalRows(0); 
             setSearchQuery(''); 
             setSortConfig({ field: null, order: null }); 
-            setFilterConfig([]); filterForm.resetFields(); setGroupingColumn(null); 
+            setFilterConfig([]); filterForm.resetFields(); setGroupingColumn([]); 
             setIsUploadModalVisible(false); 
             return;
         }
@@ -174,7 +175,7 @@ const DataGrid: React.FC<DataGridProps> = ({ dbId, tableName }) => {
         addForm.resetFields(); addColForm.resetFields();
         setSearchQuery(''); 
         setSortConfig({ field: null, order: null }); 
-        setFilterConfig([]); filterForm.resetFields(); setGroupingColumn(null); 
+        setFilterConfig([]); filterForm.resetFields(); setGroupingColumn([]); 
         setIsUploadModalVisible(false); 
         setRefetchTrigger(0); 
 
@@ -211,9 +212,8 @@ const DataGrid: React.FC<DataGridProps> = ({ dbId, tableName }) => {
         
         if (!dbId || !tableName || loadingSchema || (!loadingSchema && schema.length === 0 && !error)) {
              if (!loadingSchema && schema.length === 0 && !error && dbId && tableName) {
-                
-                 setData([]);
-                 setTotalRows(0);
+                setData([]);
+                setTotalRows(0);
              }
             return;
         };
@@ -233,7 +233,7 @@ const DataGrid: React.FC<DataGridProps> = ({ dbId, tableName }) => {
             limit: pageSize,
             
             ...(filterConfig.length > 0 && { filters: filterConfig }),
-            ...(groupingColumn && { group_by: groupingColumn }),
+            ...(groupingColumn.length> 0  && { group_by: groupingColumn }),
         };
 
         
@@ -244,7 +244,6 @@ const DataGrid: React.FC<DataGridProps> = ({ dbId, tableName }) => {
                 if (!response || !Array.isArray(response.data) || typeof response.total !== 'number') {
                     throw new Error("Invalid data format received from server.");
                 }
-
                 
                 const processedData = response.data.map((row, index) => ({
                      ...row,
@@ -270,7 +269,7 @@ const DataGrid: React.FC<DataGridProps> = ({ dbId, tableName }) => {
         currentPage,
         pageSize,
         filterConfig,   
-        groupingColumn, 
+        groupingColumn,
         loadingSchema,  
         schema,         
         error,          
@@ -912,7 +911,7 @@ const DataGrid: React.FC<DataGridProps> = ({ dbId, tableName }) => {
             // Reset states potentially affected by schema change
             setSortConfig({ field: null, order: null }); // Reset frontend sort
             setFilterConfig([]); filterForm.resetFields(); // Reset backend filters
-            setGroupingColumn(null); // Reset backend grouping
+            setGroupingColumn([]); // Reset backend grouping
             setSearchQuery(''); // Reset frontend search
             // No need to manually call refreshData or setRefetchTrigger here.
             // The schema fetch below will handle it.
@@ -975,16 +974,8 @@ const DataGrid: React.FC<DataGridProps> = ({ dbId, tableName }) => {
                         finalValue = cond.value.toISOString(); // Convert dayjs objects to ISO strings
                     } else if (cond.value !== undefined && cond.value !== null) {
                         // Ensure other values are strings if needed by backend, or handle types explicitly
-                         finalValue = String(cond.value); // Default to string conversion
-                         // Example: If backend needs numbers for numeric columns:
-                         // const selectedCol = schema.find(c => c.name === cond.column);
-                         // if (selectedCol && numericTypesLC.includes(selectedCol.type...)) {
-                         //    finalValue = Number(cond.value); // Convert to number if applicable
-                         // }
+                         finalValue = String(cond.value);
                     } else if (cond.operator !== 'IS NULL' && cond.operator !== 'IS NOT NULL') {
-                        // If value is required but is null/undefined, set to empty string? Or handle as error?
-                        // Setting to empty string might be unexpected for non-text types.
-                        // Validation rule `required: needsValue` should prevent this case.
                         console.warn(`Filter value for ${cond.column} ${cond.operator} is unexpectedly null/undefined.`);
                         finalValue = ''; // Or null depending on API expectation
                     }
@@ -1027,7 +1018,7 @@ const DataGrid: React.FC<DataGridProps> = ({ dbId, tableName }) => {
     };
 
     // --- Grouping Handler (Backend Grouping) ---
-    const handleGroupingChange = (value: string | null) => {
+    const handleGroupingChange = (value: string[]) => {
         if (editingKey) { message.warning('Please save or cancel edit first.'); return; }
         if (groupingColumn !== value) {
              setGroupingColumn(value);
@@ -1051,28 +1042,19 @@ const DataGrid: React.FC<DataGridProps> = ({ dbId, tableName }) => {
         console.log(`Upload status change for ${name}: ${status}`);
 
         if (status === 'uploading') {
-            // Already handled by customRequest setting state
-            // setUploading(true);
             return;
         }
         if (status === 'done') {
             setUploading(false);
             console.log("Upload response:", response); // Log backend response on success
             message.success(`${name} uploaded successfully. Refreshing data...`);
-            handleUploadModalCancel(); // Close modal on success
-
-            // Refresh data - go to page 1 and trigger refetch
+            handleUploadModalCancel();
             const wasAlreadyOnPage1 = currentPage === 1;
             if (!wasAlreadyOnPage1) {
-                 setCurrentPage(1); // Triggers fetch via useEffect
+                 setCurrentPage(1);
             } else {
-                 setRefetchTrigger(c => c + 1); // Force refetch on page 1 via trigger
+                 setRefetchTrigger(c => c + 1);
             }
-            // Reset filters/sort/grouping after upload? Optional.
-            // setFilterConfig([]);
-            // setGroupingColumn(null);
-            // setSortConfig({ field: null, order: null });
-            // setSearchQuery('');
 
         } else if (status === 'error') {
             setUploading(false);
@@ -1080,6 +1062,27 @@ const DataGrid: React.FC<DataGridProps> = ({ dbId, tableName }) => {
             console.error(`Upload failed (onChange): ${name}`, uploadError);
             // message.error(`${name} file upload failed.`); // Can be redundant if customRequest shows error
         }
+    };
+
+
+    const readFileContent = (fileToRead: RcFile): Promise<string | ArrayBuffer | null> => {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+    
+            reader.onload = (event) => {
+                resolve(event.target?.result || null); // result contains ArrayBuffer or string
+            };
+    
+            reader.onerror = (error) => {
+                console.error("FileReader error:", error);
+                reject(error);
+            };
+    
+            // Choose how to read:
+            // reader.readAsText(fileToRead); // To read as text (specify encoding if needed)
+            reader.readAsArrayBuffer(fileToRead); // To read as raw bytes (ArrayBuffer)
+            // reader.readAsDataURL(fileToRead); // To read as base64 data URL
+        });
     };
 
     const customUploadRequest = async (options: any) => {
@@ -1092,6 +1095,8 @@ const DataGrid: React.FC<DataGridProps> = ({ dbId, tableName }) => {
         }
 
         const formData = new FormData();
+        // const fileContent = await readFileContent(file as RcFile);
+        // console.log("File content (first few bytes/chars):", fileContent); // Careful with large files!
         formData.append('file', file as RcFile); // 'file' should match backend expectation
 
         try {
@@ -1106,13 +1111,44 @@ const DataGrid: React.FC<DataGridProps> = ({ dbId, tableName }) => {
                     console.log(`Upload progress: ${percent}%`);
                     onProgress({ percent });
                 } else {
-                    // Indicate indeterminate progress if total size is unknown
-                    onProgress({ percent: 50 }); // Or leave empty/handle differently
+                    onProgress({ percent: 50 }); 
                 }
             });
 
             // Success callback for Ant Design
             onSuccess(response, file); // response is passed to onChange handler's file.response
+            message.success(`${file.name} uploaded successfully. Refreshing schema & data...`);
+            handleUploadModalCancel();
+            setError(null); // Clear previous errors
+            setLoadingSchema(true); // Indicate schema loading
+
+            api.fetchSchema(dbId, tableName) // Refetch the schema explicitly
+                .then(fetchedSchema => {
+                    console.log("DataGrid: Schema refreshed after upload:", fetchedSchema);
+                    if (!Array.isArray(fetchedSchema)) throw new Error("Invalid schema format.");
+                    setSchema(fetchedSchema); // Update schema state
+                    const pk = fetchedSchema.find(col => col.isPrimaryKey);
+                    setPrimaryKeyName(pk ? pk.name : null);
+                    setIsPkAutoGenerated(pk ? Boolean(pk.isAutoGenerated) : false);
+
+                    // Now that schema is updated, reset page to trigger data fetch with new schema context
+                    setCurrentPage(1);
+                    // Reset other states if needed
+                    setSortConfig({ field: null, order: null });
+                    setFilterConfig([]); filterForm.resetFields();
+                    setGroupingColumn([]);
+                    setSearchQuery('');
+                })
+                .catch(err => {
+                    console.error("DataGrid: Error during schema refresh after upload:", err);
+                    setError(`Schema refresh failed after upload: ${err.message}`);
+                    setSchema([]); setPrimaryKeyName(null); setIsPkAutoGenerated(false);
+                    setData([]); setTotalRows(0); // Clear data if schema fails
+                })
+                .finally(() => {
+                    setLoadingSchema(false); // Stop schema loading
+                    // Data fetch useEffect will run automatically due to schema/page change
+                });
 
         } catch (err: any) {
             setUploading(false); // Stop uploading on error
@@ -1122,12 +1158,10 @@ const DataGrid: React.FC<DataGridProps> = ({ dbId, tableName }) => {
                             || err?.response?.data?.message // Fallback to 'message' field
                             || err?.message // Fallback to generic error message
                             || 'File upload failed';
-            message.error(`Upload Failed: ${errorMsg}`, 5); // Show error message clearly and longer
-            // Error callback for Ant Design
-            onError(new Error(errorMsg), { message: errorMsg }); // Pass error object and details
+            message.error(`Upload Failed: ${errorMsg}`, 5);
+            onError(new Error(errorMsg), { message: errorMsg });
 
         }
-        // No finally block for setUploading(false) here, handled in done/error paths
     };
 
     const beforeUploadCheck = (file: RcFile): boolean | Promise<void> => {
@@ -1154,6 +1188,79 @@ const DataGrid: React.FC<DataGridProps> = ({ dbId, tableName }) => {
         return true; // Proceed with upload (Ant Design will call customRequest)
     };
 
+    const handleDeleteColumn = useCallback((columnName: string) => {
+        if (!dbId || !tableName) return;
+
+        // Optional: Prevent deleting the primary key column
+        if (columnName === primaryKeyName) {
+            message.error(`Cannot delete the primary key column "${columnName}".`);
+            return;
+        }
+         // Optional: Prevent deleting while editing/uploading
+         if (editingKey) { message.warning('Cannot delete column while editing a row.'); return; }
+         if (uploading) { message.warning('Cannot delete column during upload.'); return; }
+
+
+        confirm({
+            title: `Delete column "${columnName}"?`,
+            icon: <DeleteOutlined style={{ color: 'red' }} />,
+            content: `This will permanently delete the column "${columnName}" and ALL data within it from the table "${tableName}". This action cannot be undone.`,
+            okText: 'Yes, Delete Column',
+            okType: 'danger',
+            cancelText: 'Cancel',
+            maskClosable: false,
+            centered: true,
+            onOk: async () => {
+                const messageKey = `delete-col-${dbId}-${tableName}-${columnName}`;
+                message.loading({ content: `Deleting column "${columnName}"...`, key: messageKey, duration: 0 });
+                setLoadingSchema(true); // Indicate activity affects schema
+                try {
+                    console.log(`DataGrid: Attempting to delete column "${columnName}" from table "${tableName}" (DB ${dbId})`);
+                    // --- Add this API call ---
+                    await api.deleteColumn(dbId, tableName, columnName);
+                    // --- End Add API call ---
+
+                    message.success({ content: `Column "${columnName}" deleted successfully. Refreshing...`, key: messageKey, duration: 2 });
+
+                    // --- Trigger Schema Refetch (Similar to Add Column/Upload) ---
+                    setError(null);
+                    api.fetchSchema(dbId, tableName) // Refetch the schema explicitly
+                        .then(fetchedSchema => {
+                            console.log("DataGrid: Schema refreshed after delete column:", fetchedSchema);
+                            if (!Array.isArray(fetchedSchema)) throw new Error("Invalid schema format.");
+                            setSchema(fetchedSchema); // Update schema state
+                            const pk = fetchedSchema.find(col => col.isPrimaryKey);
+                            setPrimaryKeyName(pk ? pk.name : null);
+                            setIsPkAutoGenerated(pk ? Boolean(pk.isAutoGenerated) : false);
+                            setCurrentPage(1); // Go to page 1 after schema change
+                            setSortConfig({ field: null, order: null });
+                            setFilterConfig([]); filterForm.resetFields();
+                            setGroupingColumn([]);
+                            setSearchQuery('');
+                        })
+                        .catch(err => {
+                            console.error("DataGrid: Error during schema refresh after delete column:", err);
+                            setError(`Schema refresh failed after deleting column: ${err.message}`);
+                            setSchema([]); setPrimaryKeyName(null); setIsPkAutoGenerated(false);
+                            setData([]); setTotalRows(0);
+                        })
+                        .finally(() => {
+                            setLoadingSchema(false);
+                        });
+                    // --- End Schema Refetch ---
+
+                } catch (err: any) {
+                    console.error(`DataGrid: Delete Column Failed for "${columnName}":`, err);
+                    const errorMsg = err?.response?.data?.error || err?.response?.data?.message || err?.message || 'Unknown error';
+                    message.error({ content: `Failed to delete column "${columnName}": ${errorMsg}`, key: messageKey, duration: 5 });
+                     setLoadingSchema(false); // Stop loading on error
+                } finally {
+                    // message.destroy(messageKey); // Might be removed too quickly by success/error with duration
+                }
+            },
+        });
+    }, [dbId, tableName, primaryKeyName, editingKey, uploading, filterForm]); // Add dependencies
+
 
     // --- Column Definitions ---
     const columns = useMemo((): ColumnsType<any> => {
@@ -1178,18 +1285,42 @@ const DataGrid: React.FC<DataGridProps> = ({ dbId, tableName }) => {
             const dateTypesLC = ['date', 'timestamp', 'datetime', 'timestamptz'];
             const booleanTypesLC = ['boolean', 'bool'];
             const numericTypesLC = ['numeric', 'integer', 'int', 'bigint', 'smallint', 'float', 'double', 'decimal', 'real', 'serial', 'bigserial'];
+            const columnMenu = (
+                <Menu onClick={({ domEvent }) => domEvent.stopPropagation()}>
+                    {/* Add other options like Rename, Change Type later if needed */}
+                    <Menu.Item
+                        key="delete"
+                        danger
+                        icon={<DeleteOutlined />}
+                        onClick={() => handleDeleteColumn(col.name)}
+                    >
+                        Delete Column
+                    </Menu.Item>
+                </Menu>
+            );
 
 
             return {
-                title: () => ( // Use function for title to include tooltip easily
-                     <Tooltip title={`${col.name} (${col.type})${col.isPrimaryKey ? ' [PK]' : ''}${!col.isNullable ? ' [Required]' : ''}`}>
-                         <span style={{ fontWeight: col.isPrimaryKey ? 600 : 400 }}>
-                            {col.name}
-                            {/* Optional: Add PK indicator visually */}
-                            {/* {col.isPrimaryKey ? <sup style={{ color: 'red', marginLeft: '2px' }}>PK</sup> : ''} */}
-                         </span>
-                     </Tooltip>
-                 ),
+                title: () => (
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                         <Tooltip title={`${col.name} (${col.type})${col.isPrimaryKey ? ' [PK]' : ''}${!col.isNullable ? ' [Required]' : ''}`}>
+                             <span style={{ fontWeight: col.isPrimaryKey ? 600 : 400, flexGrow: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginRight: '5px' }}>
+                                {col.name}
+                             </span>
+                         </Tooltip>
+                         {/* Add Dropdown trigger */}
+                         <Dropdown overlay={columnMenu} trigger={['click']} placement="bottomRight">
+                            <Button
+                                type="text"
+                                size="small"
+                                icon={<DownOutlined />}
+                                onClick={(e) => e.stopPropagation()} // Prevent sorting when clicking dropdown
+                                style={{ flexShrink: 0, marginLeft: '4px' }}
+                                disabled={editingKey !== '' || uploading} // Disable during edit/upload
+                            />
+                        </Dropdown>
+                    </div>
+                ),
                 dataIndex: col.name,
                 key: col.name, // Essential for sorter/filter matching (should match dataIndex)
                 ellipsis: { showTitle: false }, // Enable ellipsis, disable browser default title
@@ -1297,6 +1428,7 @@ const DataGrid: React.FC<DataGridProps> = ({ dbId, tableName }) => {
         sortConfig, // For sortOrder
         currentPage, pageSize, // For S.No.
         handleSave, handleCancel, handleEdit, handleDelete, handleEditingInputChange, // Action handlers
+        handleDeleteColumn, // Add the new handler function
         renderFormInput // Helper dependency
     ]);
 
@@ -1334,21 +1466,26 @@ const DataGrid: React.FC<DataGridProps> = ({ dbId, tableName }) => {
                      {`DB: ${dbId} / Table: ${tableName}`}
                      {loadingSchema && <Spin size="small" style={{ marginLeft: '10px' }} />}
                  </Title>
-                 {/* Grouping Dropdown (Backend Grouping) */}
-                 {schema.length > 0 && !loadingSchema && (
-                     <Space>
-                         <GroupOutlined title="Group By (backend operation)" />
-                         <Select
-                             allowClear placeholder="Group By (Backend)" style={{ width: 150 }}
-                             value={groupingColumn}
-                             onChange={handleGroupingChange} // Triggers backend fetch
-                             disabled={isLoading || editingKey !== '' || uploading}
-                             title="Group By (backend operation)"
-                         >
-                             {schema.map(col => ( <Option key={col.name} value={col.name}>{col.name}</Option> ))}
-                         </Select>
-                     </Space>
-                 )}
+                  {/* Grouping Dropdown (Backend Grouping) - MODIFIED FOR MULTI-SELECT */}
+                    {schema.length > 0 && !loadingSchema && (
+                        <Space>
+                            <GroupOutlined title="Group By Columns (backend operation)" />
+                            <Select
+                                mode="multiple" // <-- Enable multi-select mode
+                                allowClear
+                                placeholder="Group By Columns" // <-- Update placeholder
+                                style={{ width: 250 }} // <-- Adjust width as needed for multiple items
+                                value={groupingColumn} // <-- Bind to the array state
+                                onChange={handleGroupingChange} // <-- Use updated handler
+                                disabled={isLoading || editingKey !== '' || uploading}
+                                title="Group By Columns (backend operation)"
+                                maxTagCount="responsive" // Optional: prevent overflow
+                            >
+                                {/* Options remain the same */}
+                                {schema.map(col => ( <Option key={col.name} value={col.name}>{col.name}</Option> ))}
+                            </Select>
+                        </Space>
+                    )}
             </div>
 
              {/* Error Alert */}

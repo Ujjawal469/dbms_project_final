@@ -13,5 +13,6 @@ router.get('/databases/:dbId/tables/:tableName/schema', metaController.getSchema
 router.post('/databases/:dbId/tables/:tableName/columns', metaController.addColumnToTable); 
 router.delete('/databases/:dbId/tables/:tableName', metaController.deleteTable);       
 router.patch('/databases/:dbId/tables/:oldTableName', metaController.renameTable);     
+router.delete('/databases/:dbId/tables/:tableName/columns/:columnName',metaController.deleteTableColumn);
 
 export default router;

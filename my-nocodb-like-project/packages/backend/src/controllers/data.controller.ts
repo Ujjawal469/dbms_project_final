@@ -47,8 +47,20 @@ export const getTableData = async (req: Request, res: Response, next: NextFuncti
                 filters = undefined;
             }
         }
-        console.log(`CONTROLLER: getTableData - User: ${userId}, DB: ${dbId}, Table: "${table_name}", Page: ${page}, Limit: ${limit}`);
-        const result = await dataService.getData(userId, dbId, table_name, { limit, offset, filters });
+
+        const groupByColumn = req.query.group_by as string[];
+        if (groupByColumn && typeof groupByColumn !== 'string') {
+             console.warn("Ignoring invalid group_by parameter type:", groupByColumn);
+        }
+        const validatedGroupBy = (groupByColumn);
+        console.log(`CONTROLLER: getTableData - User: ${userId}, DB: ${dbId}, Table: "${table_name}", Page: ${page}, Limit: ${limit}, GroupBy: ${validatedGroupBy}`); // Log it
+        const result = await dataService.getData(userId, dbId, table_name, {
+             limit,
+             offset,
+             filters,
+             group_by: validatedGroupBy
+            });
+
         const final = convertBigIntsToStrings(result);
         res.status(200).json(final);
     } catch (error: any) {
@@ -155,6 +167,7 @@ export const deleteExistingRow = async (req: Request, res: Response, next: NextF
 
 export const uploadTableData = async (req: Request, res: Response) => {
     try {
+        console.log("hihh ihihhihiih");
         const userId = req.session?.userId;
         if (!userId) {
              return res.status(401).json({ message: 'Unauthorized. Please log in.' });
@@ -162,6 +175,7 @@ export const uploadTableData = async (req: Request, res: Response) => {
         const { tableName } = req.params;
         const dbIdParam = req.params.dbId;
         const file = req.file;
+        console.log(file);
         if (!tableName) {
             return res.status(400).json({ message: 'Table name parameter is required.' });
         }

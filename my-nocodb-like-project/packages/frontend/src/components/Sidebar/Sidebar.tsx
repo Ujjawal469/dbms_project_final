@@ -117,7 +117,7 @@ const Sidebar: React.FC<SidebarProps> = ({
         }
     }, [fetchUserDatabases, currentUser, loadingUser]);
 
- 
+    
     const fetchTablesForDb = useCallback(async (dbId: number) => {
         if (!dbId) return;
         console.log(`Sidebar: Fetching tables for DB ID: ${dbId}`);
@@ -144,10 +144,7 @@ const Sidebar: React.FC<SidebarProps> = ({
         }
     }, [onTableListChange]);
 
- 
-        // Corrected useEffect
         useEffect(() => {
-          // Only run logic if a database is actually selected
           if (selectedDatabaseId) {
               const currentTableState = tablesByDb[selectedDatabaseId]; 
               let shouldFetch = false;
@@ -289,17 +286,15 @@ const Sidebar: React.FC<SidebarProps> = ({
                     console.log(`Sidebar: Attempting to delete database: ${db.db_name} (ID: ${db.db_id})`);
                     await api.deleteDatabase(db.db_id);
                     message.success({ content: `Database "${db.db_name}" deleted.`, key: messageKey, duration: 3 });
- 
                     if (selectedDatabaseId === db.db_id) {
                         onSelectDatabase(null);
                         onSelectTable(null, null);
                     }
- 
-                     setTablesByDb(prev => {
-                         const newState = { ...prev };
-                         delete newState[db.db_id];
-                         return newState;
-                     });
+                    setTablesByDb(prev => {
+                        const newState = { ...prev };
+                        delete newState[db.db_id];
+                        return newState;
+                    });
                     await fetchUserDatabases();  
                 } catch (err: any) {
                     console.error(`Sidebar: Error deleting database ID ${db.db_id}:`, err);
@@ -307,14 +302,12 @@ const Sidebar: React.FC<SidebarProps> = ({
                     setDatabaseError(`Failed to delete DB: ${errorMsg}`);  
                     message.error({ content: `Failed to delete database: ${errorMsg}`, key: messageKey, duration: 5 });
                 } finally {
-                     setLoadingDatabases(false);  
+                    setLoadingDatabases(false);  
                 }
             },
         });
     };
 
-
- 
     const showAddTableModal = (dbId: number) => {
         if (!dbId) return;
         setAddingTableToDbId(dbId);
@@ -329,8 +322,6 @@ const Sidebar: React.FC<SidebarProps> = ({
             const values = await addTableForm.validateFields();
             const newTableName = values.tableName.trim();
             if (!newTableName) { message.error("Table name cannot be empty."); return; }
-
- 
             const currentTables = tablesByDb[currentDbId]?.data || [];
             if (currentTables.some(t => t.table_name === newTableName)) {
                 message.error(`Table "${newTableName}" already exists in this database.`); return;
@@ -360,6 +351,7 @@ const Sidebar: React.FC<SidebarProps> = ({
         renameTableForm.setFieldsValue({ newTableName: oldTableName });
         setIsRenameTableModalVisible(true);
     };
+    
     const handleRenameTableCancel = () => { setIsRenameTableModalVisible(false); setRenamingTableInfo(null); };
     const handleRenameTableOk = async () => {
         if (!renamingTableInfo) return;
@@ -369,12 +361,10 @@ const Sidebar: React.FC<SidebarProps> = ({
             const values = await renameTableForm.validateFields();
             const newTableName = values.newTableName.trim();
             if (newTableName === oldName) { message.info("No changes made."); handleRenameTableCancel(); return; }
-
- 
-             const currentTables = tablesByDb[dbId]?.data || [];
-             if (currentTables.some(t => t.table_name === newTableName)) {
-                 message.error(`Another table named "${newTableName}" already exists in this database.`); return;
-             }
+            const currentTables = tablesByDb[dbId]?.data || [];
+            if (currentTables.some(t => t.table_name === newTableName)) {
+                message.error(`Another table named "${newTableName}" already exists in this database.`); return;
+            }
 
             setConfirmLoadingRenameTable(true);
             const messageKey = `rename-table-${dbId}-${oldName}`;
@@ -383,8 +373,6 @@ const Sidebar: React.FC<SidebarProps> = ({
             message.success({ content: `Table renamed successfully!`, key: messageKey, duration: 3 });
             handleRenameTableCancel();
             await fetchTablesForDb(dbId);  
-
- 
             if (selectedDatabaseId === dbId && selectedTableName === oldName) {
                 onSelectTable(dbId, newTableName);
             }
@@ -439,7 +427,6 @@ const Sidebar: React.FC<SidebarProps> = ({
             },
         });
     };
-
  
     const handleCreateView = (targetDbId: number, targetTable: string, viewType: 'grid' | 'gallery') => {
         if (!targetDbId || !targetTable) return;
@@ -451,21 +438,34 @@ const Sidebar: React.FC<SidebarProps> = ({
         onSelectTable(targetDbId, targetTable);
     };
 
-
- 
-
-    const renderTableActions = (dbId: number, tableName: string) => (
-        <Menu onClick={({ domEvent }) => { domEvent.stopPropagation(); }}>
-            {/* <Menu.SubMenu key="create-view" title="Create View" icon={<PlusOutlined />}>
-                <Menu.Item key="view-grid" icon={<TableOutlined />} onClick={() => handleCreateView(dbId, tableName, 'grid')} > Grid View </Menu.Item>
-                <Menu.Item key="view-gallery" icon={<AppstoreOutlined />} onClick={() => handleCreateView(dbId, tableName, 'gallery')} > Gallery View </Menu.Item>
-            </Menu.SubMenu>
-            <Menu.Divider /> */}
-            <Menu.Item key="rename-table" icon={<EditOutlined />} onClick={() => showRenameTableModal(dbId, tableName)} > Rename Table </Menu.Item>
-            <Menu.Divider />
-            <Menu.Item key="delete-table" danger icon={<DeleteOutlined />} onClick={() => handleDeleteTable(dbId, tableName)} > Delete Table </Menu.Item>
-        </Menu>
-    );
+    const renderTableActions = useCallback((dbId: number, tableName: string) => (
+      <Menu onClick={({ domEvent }) => { domEvent.stopPropagation(); }}>
+          {/* --- Add/Modify View Switch SubMenu --- */}
+          <Menu.SubMenu key="switch-view" title="Switch View" icon={<AppstoreOutlined />}>
+            <Menu.Item
+                key="view-grid"
+                icon={<TableOutlined />}
+                // Call the prop passed from Dashboard
+                onClick={() => { if (onCreateView) onCreateView(dbId, tableName, 'grid'); }}
+            >
+                Grid View
+            </Menu.Item>
+            <Menu.Item
+                key="view-gallery"
+                icon={<AppstoreOutlined />} // Maybe use a different icon like PictureOutlined?
+                  // Call the prop passed from Dashboard
+                onClick={() => { if (onCreateView) onCreateView(dbId, tableName, 'gallery'); }}
+            >
+                Gallery View
+            </Menu.Item>
+          </Menu.SubMenu>
+          {/* --- End View Switch SubMenu --- */}
+          <Menu.Divider />
+        <Menu.Item key="rename-table" icon={<EditOutlined />} onClick={(e) => showRenameTableModal(dbId, tableName)} > Rename Table </Menu.Item>
+        <Menu.Divider />
+        <Menu.Item key="delete-table" danger icon={<DeleteOutlined />} onClick={(e) => handleDeleteTable(dbId, tableName)} > Delete Table </Menu.Item>
+    </Menu>
+    ), [onCreateView, showRenameTableModal, handleDeleteTable]);
 
     const renderDatabaseActions = (db: ApiDatabase) => (
          <Menu onClick={({ domEvent }) => { domEvent.stopPropagation(); }}>
@@ -501,6 +501,7 @@ const Sidebar: React.FC<SidebarProps> = ({
            currentSelectedKeys.push(`table-${selectedDatabaseId}-${selectedTableName}`);
       }
       // No need to select the SubMenu key itself in `selectedKeys`
+      
   
       return (
           <Menu

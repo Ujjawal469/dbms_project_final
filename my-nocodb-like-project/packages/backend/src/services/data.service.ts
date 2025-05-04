@@ -22,6 +22,7 @@ interface PaginationOptions {
 
 interface GetDataOptions extends PaginationOptions {
     filters?: FilterCondition[];
+    group_by?: string[];
     // Future: sort_by?: string; sort_order?: 'asc' | 'desc';
 }
 
@@ -102,53 +103,111 @@ export const getData = async (
         }
         const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join('')}` : '';
 
-        // 3. Execute Count Query
-        const countSql = `SELECT COUNT(*) FROM ${safePhysicalTableName} ${whereClause}`;
-        console.log(`DATA SERVICE (Count SQL): ${countSql}`);
-        console.log("Params for Count:", queryParams);
-        const countResult = await prisma.$queryRawUnsafe<{ count: bigint }[]>(countSql, ...queryParams);
-        const total = Number(countResult[0]?.count ?? 0);
-        console.log("Total rows matching:", total);
+       // --- START: Modified Query Building for Group By (Using Original Variables) ---
+       let groupByClause = '';     // Your original variable
+       let orderByClause = '';     // Your original variable
+       let selectClause = '';      // Your original variable (Base SELECT ... FROM)
+       let countSelectClause = ''; // Your original variable (Base SELECT COUNT ... FROM)
+       let columnList = '';        // Specific columns for SELECT list
 
-        // 4. Execute Data Query
-        if (!pkColumn) {
-            // Cannot reliably paginate without a PK or unique ordering column
-            console.error(`DATA SERVICE: No primary key found for ${physicalTableName}. Cannot guarantee stable pagination order.`);
-            throw new Error(`Data fetching requires a primary key on table "${baseTableName}" for stable ordering.`);
-        }
-        const orderByColumn = `"${pkColumn}"`; // Order by PK
-        const columnList = currentSchema.map(col => `"${col.name}"`).join(', '); // Select columns from schema
+       let isGrouping = false;
+       let validatedGroupByColumns: string[] = []; // Keep track of validated columns for grouping
 
-        const dataQueryParams = [...queryParams]; // Start with WHERE params
-        dataQueryParams.push(options.limit);     // Add LIMIT param value
-        dataQueryParams.push(options.offset);    // Add OFFSET param value
-        const limitPlaceholder = `$${paramIndex++}`; // Placeholder index continues
-        const offsetPlaceholder = `$${paramIndex++}`;
+       // Validate and prepare group_by columns if provided
+       if (options.group_by && Array.isArray(options.group_by) && options.group_by.length > 0) {
+           validatedGroupByColumns = options.group_by.filter(colName => {
+               const isValid = validColumnNames.has(colName);
+               if (!isValid) console.warn(`DATA SERVICE: Ignoring invalid group_by column: ${colName}`);
+               return isValid;
+           });
 
-        const dataSql = `SELECT ${columnList} FROM ${safePhysicalTableName} ${whereClause} ORDER BY ${orderByColumn} ASC LIMIT ${limitPlaceholder} OFFSET ${offsetPlaceholder}`;
-        console.log(`DATA SERVICE (Data SQL): ${dataSql} (Limit: ${options.limit}, Offset: ${options.offset})`);
-        console.log("Params for Data:", dataQueryParams);
+           if (validatedGroupByColumns.length > 0) {
+               isGrouping = true;
+               const safeGroupByColumns = validatedGroupByColumns.map(colName => `"${colName}"`);
+               groupByClause = `GROUP BY ${safeGroupByColumns.join(', ')}`;
+               // Set SELECT list for grouped data query
+               columnList = `${safeGroupByColumns.join(', ')}, COUNT(*) as "group_count"`;
+               // Set ORDER BY for grouped data query
+               orderByClause = `ORDER BY ${safeGroupByColumns.join(', ')} ASC`;
+               // Define the base COUNT SELECT for grouping (subquery method)
+               countSelectClause = `SELECT COUNT(*) as count FROM (SELECT DISTINCT ${safeGroupByColumns.join(', ')} FROM ${safePhysicalTableName} ${whereClause}) AS distinct_groups`;
+               console.log(`DATA SERVICE: Applying GROUP BY on columns: ${safeGroupByColumns.join(', ')}`);
+           } else {
+                console.warn(`DATA SERVICE: No valid columns provided for group_by after validation. Proceeding without grouping.`);
+           }
+       }
 
-        const data = await prisma.$queryRawUnsafe<any[]>(dataSql, ...dataQueryParams);
-        console.log(`Fetched ${data.length} rows for page.`);
+       // --- If NOT grouping (or if all group_by columns were invalid) ---
+       if (!isGrouping) {
+           if (!pkColumn) { // Check for PK for default ordering
+               console.error(`DATA SERVICE: No primary key found for ${physicalTableName}. Cannot guarantee stable pagination order.`);
+               throw new Error(`Data fetching requires a primary key on table "${baseTableName}" for stable ordering.`);
+           }
+           const safeOrderByColumn = `"${pkColumn}"`;
+           orderByClause = `ORDER BY ${safeOrderByColumn} ASC`; // Set default ORDER BY
+           // Set SELECT list to all columns from schema
+           columnList = currentSchema.map(col => `"${col.name}"`).join(', ');
+           // Set standard COUNT SELECT
+           countSelectClause = `SELECT COUNT(*) as count FROM ${safePhysicalTableName}`;
+           // groupByClause remains empty ''
+       }
 
-        return { data, total };
+       // Define the base SELECT ... FROM part (used by data query)
+       selectClause = `SELECT ${columnList} FROM ${safePhysicalTableName}`;
 
-    } catch (error: any) {
-        // Catch errors from schema fetch or queries
-        console.error(`DATA SERVICE ERROR fetching data for physical table ${physicalTableName}:`, error);
-        if ((error as any).statusCode === 404) { // Propagate 'Not Found' errors from getTableSchema
-             throw error;
-        }
-        if (error.code === '42P01' || error.message?.includes("does not exist")) {
-            throw new Error(`Table "${baseTableName}" (physical: ${physicalTableName}) not found in database.`);
-        }
-        if (error.code === '42703' && error.message?.includes('column')) {
-            throw new Error(`Query failed: Invalid column specified in filter or ordering for table "${baseTableName}".`);
-        }
-        // Add other specific DB error checks if needed
-        throw new Error(`Could not fetch data for table "${baseTableName}". DB Error: ${error.message || error}`);
-    }
+       // --- END: Modified Query Building ---
+
+
+       // 3. Execute Count Query
+       // Use the countSelectClause determined above. Params are only the WHERE clause params.
+       // Note: The grouping count query (subquery method) already incorporates the whereClause.
+       // The non-grouping count query needs the whereClause appended *if* it exists.
+       const finalCountSql = isGrouping ? countSelectClause : `${countSelectClause} ${whereClause}`;
+
+       console.log(`DATA SERVICE (Count SQL): ${finalCountSql}`);
+       console.log("Params for Count:", queryParams);
+       const countResult = await prisma.$queryRawUnsafe<{ count: bigint }[]>(finalCountSql, ...queryParams);
+       const total = Number(countResult[0]?.count ?? 0); // Total matching rows OR total distinct groups
+       console.log("Total items/groups matching:", total);
+
+
+       // 4. Execute Data Query
+       // Prepare final parameters including LIMIT and OFFSET
+       const dataQueryParams = [...queryParams]; // Start with WHERE params
+       // Recalculate placeholder indices AFTER where params
+       let dataParamIndex = queryParams.length + 1;
+       dataQueryParams.push(options.limit);     // Add LIMIT param value
+       dataQueryParams.push(options.offset);    // Add OFFSET param value
+       const limitPlaceholder = `$${dataParamIndex++}`;
+       const offsetPlaceholder = `$${dataParamIndex++}`;
+
+       // Construct the final data query using determined clauses
+       // Use selectClause (which now has the correct SELECT ... FROM part)
+       const dataSql = `${selectClause} ${whereClause} ${groupByClause} ${orderByClause} LIMIT ${limitPlaceholder} OFFSET ${offsetPlaceholder}`;
+       console.log(`DATA SERVICE (Data SQL): ${dataSql} (Limit: ${options.limit}, Offset: ${options.offset})`);
+       console.log("Params for Data:", dataQueryParams);
+
+       const data = await prisma.$queryRawUnsafe<any[]>(dataSql, ...dataQueryParams);
+       console.log(`Fetched ${data.length} rows/groups for page.`);
+
+       // Return data and the calculated total
+       return { data, total };
+
+   } catch (error: any) {
+       // Catch errors from schema fetch or queries (keep existing error handling)
+       console.error(`DATA SERVICE ERROR fetching data for physical table ${physicalTableName}:`, error);
+       if ((error as any).statusCode === 404) { throw error; }
+       if (error.code === '42P01' || error.message?.includes("does not exist")) {
+           throw new Error(`Table "${baseTableName}" (physical: ${physicalTableName}) not found in database.`);
+       }
+       if (error.code === '42803') { // Grouping error
+           throw new Error(`Grouping error for table "${baseTableName}". Ensure selected columns are valid for GROUP BY. Error: ${error.message}`);
+       }
+       if (error.code === '42703' && error.message?.includes('column')) {
+           throw new Error(`Query failed: Invalid column specified in filter or grouping for table "${baseTableName}".`);
+       }
+       throw new Error(`Could not fetch data for table "${baseTableName}". DB Error: ${error.message || error}`);
+   }
 };
 
 
@@ -441,163 +500,159 @@ export const deleteRow = async (
 };
 
 
-// --- Process CSV Upload (Using 4-Arg Signature) ---
+// --- Process CSV Upload (Rebuild - TEXT cols + Auto serial_num PK) ---
 export const processCsvUpload = async (
   userId: number,
   dbId: number,
   baseTableName: string,
   fileBuffer: Buffer
 ): Promise<{ message: string; rowsProcessed: number; tableRebuilt: boolean }> => {
+  // Get the physical name - uses metaService helper
   const physicalTableName = metaService.getPhysicalTableName(baseTableName, userId, dbId);
-  console.log(`DATA SERVICE: Processing CSV upload (Rebuild Mode) for physical table: ${physicalTableName} (Base: ${baseTableName}, User: ${userId}, DB: ${dbId})`);
-  const safePhysicalTableName = `"${physicalTableName}"`;
+  console.log(`DATA SERVICE: Processing CSV upload (REBUILD - TEXT COLS + Auto PK MODE) for physical table: ${physicalTableName} (Base: ${baseTableName}, User: ${userId}, DB: ${dbId})`);
+  const safePhysicalTableName = `"${physicalTableName}"`; // Simple quoting
 
   const csvData: any[] = [];
   let csvHeaders: string[] = [];
   let sanitizedHeaders: string[] = [];
+  const autoPrimaryKeyName = "serial_num"; // *** Define the auto-generated PK column name ***
 
-  // --- 1. Parse CSV (No changes needed here) ---
+  // --- 1. Parse CSV (Extract sanitized headers and data) ---
   try {
-      await new Promise((resolve, reject) => {
-          const bufferStream = new stream.PassThrough();
-          bufferStream.end(fileBuffer);
-          bufferStream
-              .pipe(csvParser())
-              .on('headers', (headers: string[]) => { /* ... header processing ... */
-                  console.log('CSV Headers Raw:', headers);
-                  if (!headers || headers.length === 0 || headers.some(h => !h || h.trim() === '')) {
-                      return reject(new Error("CSV headers are invalid or empty."));
-                  }
-                  csvHeaders = headers;
-                  sanitizedHeaders = headers.map(h =>
-                      h.trim().toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '')
-                  ).map(h => /^[a-z_]/.test(h) ? h : `_${h}`);
+    await new Promise((resolve, reject) => {
+      const bufferStream = new stream.PassThrough();
+      bufferStream.end(fileBuffer);
+      bufferStream
+        .pipe(csvParser())
+        .on('headers', (headers: string[]) => {
+          console.log('CSV Headers Raw:', headers);
+          if (!headers || headers.length === 0 || headers.some(h => !h || h.trim() === '')) {
+             console.warn("CSV Warning: Headers are empty or invalid. Will create table with only auto-PK if no valid headers found.");
+             csvHeaders = headers || []; // Ensure it's an array
+          } else {
+              csvHeaders = headers;
+          }
 
-                  const headerSet = new Set(sanitizedHeaders);
-                  if (headerSet.size !== sanitizedHeaders.length) {
-                      return reject(new Error("CSV contains duplicate header names after sanitization."));
-                  }
-                  if (sanitizedHeaders.length === 0){
-                       return reject(new Error("No valid column headers found after sanitization."));
-                   }
-                  console.log('CSV Headers Sanitized:', sanitizedHeaders);
-              })
-              .on('data', (data: Record<string, string>) => { /* ... data row processing ... */
-                  const row: Record<string, any> = {};
-                  sanitizedHeaders.forEach((sHeader, index) => {
-                      const originalHeader = csvHeaders[index];
-                      row[sHeader] = (data[originalHeader] !== undefined && data[originalHeader] !== null && data[originalHeader] !== '') ? data[originalHeader] : null;
-                  });
-                  csvData.push(row);
-               })
-              .on('end', () => { /* ... end processing ... */
-                  if (sanitizedHeaders.length === 0) { // Re-check here after parsing is complete
-                      return reject(new Error("No valid headers found in CSV file after processing."));
-                  }
-                  console.log(`CSV Parsed successfully: ${csvData.length} data rows.`);
-                  resolve(true);
-               })
-              .on('error', (error: Error) => { /* ... error handling ... */ reject(error); });
-      });
-       // Final check after promise resolution (though 'end' check is likely sufficient)
-      if (sanitizedHeaders.length === 0) {
-          throw new Error("No valid headers found in CSV file after processing.");
-      }
+          // Sanitize headers (lowercase, underscore spaces, remove invalid chars, prefix if starting with number)
+          sanitizedHeaders = csvHeaders.map(h => // Map potentially empty csvHeaders
+            (h || '').trim().toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '')
+          ).map(h => /^[a-z_]/.test(h) ? h : `_${h}`)
+           .filter(h => h.length > 0); // Filter out headers that become empty after sanitization
+
+          const headerSet = new Set(sanitizedHeaders);
+          if (headerSet.size !== sanitizedHeaders.length) {
+            return reject(new Error("CSV contains duplicate header names after sanitization."));
+          }
+          // No longer need to error if sanitizedHeaders is empty, we have the auto-PK
+          console.log('CSV Headers Sanitized (excluding potential empty ones):', sanitizedHeaders);
+
+          // *** CRUCIAL: Check if sanitized headers conflict with the auto PK name ***
+          if (sanitizedHeaders.includes(autoPrimaryKeyName)) {
+              return reject(new Error(`CSV header conflicts with the automatically generated primary key column name '${autoPrimaryKeyName}'. Please rename the column in the CSV.`));
+          }
+        })
+        .on('data', (data: Record<string, string>) => {
+            const row: Record<string, any> = {};
+             // Only process data for headers that were valid and sanitized
+            sanitizedHeaders.forEach((sHeader, index) => {
+                // Find the original header index carefully, especially if some were invalid/empty
+                const originalHeader = csvHeaders.find((h, i) =>
+                     (h || '').trim().toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '').replace(/^([^a-z_])/, '_$1') === sHeader);
+
+                if (originalHeader && data[originalHeader] !== undefined && data[originalHeader] !== null && data[originalHeader] !== '') {
+                     row[sHeader] = String(data[originalHeader]);
+                } else {
+                     row[sHeader] = null; // Use null if original header missing or value empty/null
+                }
+            });
+            csvData.push(row);
+        })
+        .on('end', () => {
+             console.log(`CSV Parsed successfully: ${csvData.length} data rows processed.`);
+             resolve(true);
+         })
+        .on('error', (error: Error) => reject(error));
+    });
+
   } catch (parseError: any) {
-      console.error("CSV Parsing failed:", parseError);
-      throw new Error(`Failed to parse CSV file: ${parseError.message}`);
+    console.error("CSV Parsing failed:", parseError);
+    throw new Error(`Failed to parse CSV file: ${parseError.message}`);
   }
 
-   // --- 2. Database Operations (Rebuild within Transaction) ---
-   let tableWasRebuilt = false;
-   try {
-       await prisma.$executeRawUnsafe(`BEGIN`);
 
-       // Check if physical table exists
-       const checkTableQuery = `SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = $1);`;
-       const tableExistsResult = await prisma.$queryRawUnsafe<{ exists: boolean }[]>(checkTableQuery, physicalTableName);
-       const tableExists = tableExistsResult[0]?.exists ?? false;
+  // --- 2. Database Operations (Rebuild within Transaction) ---
+  let tableWasRebuilt = false;
+  try {
+    await prisma.$executeRawUnsafe(`BEGIN`);
 
-       if (tableExists) {
-           console.log(`Physical table '${physicalTableName}' exists. Proceeding with rebuild.`);
+    // --- DROP Existing Table (If it exists) ---
+    console.log(`Attempting to drop existing physical table (if exists) ${safePhysicalTableName} for rebuild...`);
+    await prisma.$executeRawUnsafe(`DROP TABLE IF EXISTS ${safePhysicalTableName}`);
+    console.log(`Ensured ${safePhysicalTableName} is dropped (or didn't exist).`);
+    tableWasRebuilt = true;
+    const createCsvColumns = sanitizedHeaders
+        .map(h => `"${h}" TEXT`)
+        .join(', ');
+    const createTableQuery = `CREATE TABLE ${safePhysicalTableName} (
+            "${autoPrimaryKeyName}" BIGSERIAL PRIMARY KEY${sanitizedHeaders.length > 0 ? ',' : ''}
+            ${createCsvColumns}
+        )`; // Use BIGSERIAL as requested
 
-           // Optional Schema Validation
-           try {
-                const existingSchema = await metaService.getTableSchema(userId, dbId, baseTableName);
-                // ... (rest of schema validation logic) ...
-                const existingCols = new Set(existingSchema.map(c => c.name.toLowerCase()));
-                const missingInDb = sanitizedHeaders.filter(h => !existingCols.has(h.toLowerCase()));
-                if (missingInDb.length > 0) {
-                    await prisma.$executeRawUnsafe(`ROLLBACK`);
-                    throw new Error(`Schema mismatch: CSV header(s) '${missingInDb.join(', ')}' not found in existing table '${baseTableName}'. Upload aborted.`);
-                }
-                 const missingInCsv = existingSchema.map(c => c.name.toLowerCase()).filter(c => !sanitizedHeaders.includes(c));
-                  if (missingInCsv.length > 0) {
-                      console.warn(`Schema mismatch: Existing table column(s) '${missingInCsv.join(', ')}' not found in CSV for table '${baseTableName}'. Data will be lost/defaulted.`);
-                  }
-           } catch (schemaValidationError: any) {
-               await prisma.$executeRawUnsafe(`ROLLBACK`);
-               console.error(`Error during schema validation for ${physicalTableName}:`, schemaValidationError);
-               throw new Error(`Could not validate schema of existing table "${baseTableName}" before rebuild. Upload aborted. Error: ${schemaValidationError.message}`);
-           }
-
-           // Drop Existing Table
-           console.log(`Dropping existing physical table ${safePhysicalTableName} for rebuild...`);
-           await prisma.$executeRawUnsafe(`DROP TABLE ${safePhysicalTableName}`);
-           console.log(`Dropped ${safePhysicalTableName}.`);
-           tableWasRebuilt = true;
-
-       } else {
-           console.log(`Physical table '${physicalTableName}' does not exist. Creating new table.`);
-           tableWasRebuilt = true;
-       }
-
-       // ** Create Table **
-       const primaryKeyName = "id";
-       // ... (Create table logic remains the same) ...
-       if (sanitizedHeaders.includes(primaryKeyName)) { await prisma.$executeRawUnsafe(`ROLLBACK`); throw new Error(`CSV header conflicts...`) }
-       const createColumns = sanitizedHeaders.map(h => `"${h}" TEXT`).join(', ');
-       const createTableQuery = `CREATE TABLE ${safePhysicalTableName} ("${primaryKeyName}" SERIAL PRIMARY KEY, ${createColumns})`;
-       await prisma.$executeRawUnsafe(createTableQuery);
-       console.log(`Physical table '${physicalTableName}' created.`);
+    console.log(`Creating new physical table ${safePhysicalTableName} with auto PK '${autoPrimaryKeyName}' and TEXT columns for others...`);
+    await prisma.$executeRawUnsafe(createTableQuery);
+    console.log(`Physical table ${safePhysicalTableName} created.`);
 
 
-       // ** Insert Data **
-       if (csvData.length > 0) {
-           console.log(`Inserting ${csvData.length} new rows into ${safePhysicalTableName}...`);
-           const columnList = sanitizedHeaders.map(h => `"${h}"`).join(', ');
+    // --- Insert Data ---
+    if (csvData.length > 0) {
+        // **IMPORTANT**: The column list for INSERT *must only* include the columns derived from the CSV.
+        // The database will handle the auto-generated 'serial_num' PK automatically.
+        if (sanitizedHeaders.length === 0) {
+             console.log("CSV contained data rows but no valid headers to insert into. Skipping insert.");
+        } else {
+            console.log(`Inserting ${csvData.length} new rows into ${safePhysicalTableName} (excluding auto PK)...`);
+            // Prepare column list for INSERT statement (ONLY sanitized headers)
+            const columnList = sanitizedHeaders.map(h => `"${h}"`).join(', ');
 
-           // **** FIX: Initialize arrays here ****
-           const valuePlaceholders: string[] = [];
-           const allValues: any[] = [];
-           let paramCounter = 1;
+            const valuesToInsert: any[] = [];
+            const valuePlaceholdersSegments: string[] = [];
+            let paramCounter = 1;
 
-           csvData.forEach(row => {
-               const rowPlaceholders: string[] = [];
-               sanitizedHeaders.forEach(header => {
-                   rowPlaceholders.push(`$${paramCounter++}`);
-                   allValues.push(row[header] ?? null);
-               });
-               valuePlaceholders.push(`(${rowPlaceholders.join(', ')})`);
-           });
+            csvData.forEach(row => {
+                const rowPlaceholders: string[] = [];
+                // Iterate using sanitizedHeaders ONLY
+                sanitizedHeaders.forEach(header => {
+                    rowPlaceholders.push(`$${paramCounter++}`);
+                    valuesToInsert.push(row[header] ?? null); // Use null if undefined/null
+                });
+                valuePlaceholdersSegments.push(`(${rowPlaceholders.join(', ')})`);
+            });
 
-           if (valuePlaceholders.length > 0) { // Use corrected variable name
-               const insertSql = `INSERT INTO ${safePhysicalTableName} (${columnList}) VALUES ${valuePlaceholders.join(', ')}`; // Use corrected variable name
-               console.log(`Executing Insert SQL with ${allValues.length} parameters.`); // Use corrected variable name
-               await prisma.$executeRawUnsafe(insertSql, ...allValues); // Use corrected variable name
-           }
-       }
+            if (valuesToInsert.length > 0) {
+                const insertSql = `INSERT INTO ${safePhysicalTableName} (${columnList}) VALUES ${valuePlaceholdersSegments.join(', ')}`;
+                console.log(`Executing Insert SQL for CSV columns with ${valuesToInsert.length} parameters.`);
+                await prisma.$executeRawUnsafe(insertSql, ...valuesToInsert);
+            }
+        }
+    } else {
+         console.log("CSV data array is empty, no rows to insert.");
+    }
 
-       await prisma.$executeRawUnsafe(`COMMIT`);
+    // --- Commit Transaction ---
+    await prisma.$executeRawUnsafe(`COMMIT`);
+    console.log(`Transaction committed for ${safePhysicalTableName}.`);
 
-       const message = `Successfully rebuilt table '${baseTableName}' (physical: ${physicalTableName}) based on CSV and imported ${csvData.length} rows.`;
-       return { message, rowsProcessed: csvData.length, tableRebuilt: tableWasRebuilt };
+    const message = `Successfully uploaded ${csvData.length} rows to table '${baseTableName}'. Table was rebuilt with auto-incrementing '${autoPrimaryKeyName}' PRIMARY KEY and other columns from CSV as TEXT.`;
+    return { message, rowsProcessed: csvData.length, tableRebuilt: tableWasRebuilt };
 
-   } catch (dbError: any) {
-       // ... (db error handling remains the same) ...
-       console.error(`Database operation failed during CSV processing (Rebuild Mode) for ${physicalTableName}:`, dbError);
-       try { await prisma.$executeRawUnsafe(`ROLLBACK`); console.log("Transaction rolled back."); }
-       catch (rollbackError) { console.error("Failed to rollback transaction:", rollbackError); }
-       throw new Error(`Database operation failed during rebuild for table "${baseTableName}": ${dbError.message}`);
-   }
+  } catch (dbError: any) {
+    console.error(`Database operation failed during CSV processing (Rebuild Mode) for ${physicalTableName}:`, dbError);
+    try {
+        await prisma.$executeRawUnsafe(`ROLLBACK`);
+        console.log("Transaction rolled back due to error.");
+    } catch (rollbackError) {
+        console.error("Failed to rollback transaction:", rollbackError);
+    }
+    throw new Error(`Database operation failed during rebuild for table "${baseTableName}": ${dbError.message}`);
+  }
 };

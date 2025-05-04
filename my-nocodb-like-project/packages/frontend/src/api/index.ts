@@ -18,7 +18,6 @@ console.log("🌐 API Base URL:", API_BASE_URL);
 const apiClient = axios.create({
     baseURL: API_BASE_URL,
     timeout: 15000, // Reasonable timeout
-    headers: { 'Content-Type': 'application/json' },
     withCredentials: true // Send cookies for session management
 });
 
@@ -348,7 +347,7 @@ export const fetchData = async (
         search?: string;
         sort_by?: string;
         sort_order?: 'asc' | 'desc';
-        group_by?: string;
+        group_by?: string[];
     }
 ): Promise<ApiFetchDataResponse> => {
     if (!dbId || !tableName) {
@@ -417,6 +416,7 @@ export const createRecord = async (
     }
 };
 
+
 export const updateRecord = async (
     dbId: number,
     tableName: string,
@@ -445,6 +445,50 @@ export const updateRecord = async (
         throw handleApiError(err as AxiosError | Error, `updateRecord(DB ID: ${dbId}, Table: ${tableName}, PK: ${pkValue})`);
     }
 };
+
+
+
+
+export const deleteColumn = async (
+  dbId: number,
+  tableName: string,
+  columnName: string
+): Promise<any> => { // Return type matches other functions for consistency
+  // 1. Input Validation (matching other functions)
+  if (!dbId || !tableName || !columnName) {
+      // Throw simple error, handled by caller or global handler eventually
+      throw new Error("DB ID, Table name, and Column name are required for deleting a column.");
+  }
+
+  try {
+      // 2. Encode parameters for URL path
+      const encodedTableName = encodeURIComponent(tableName.trim());
+      const encodedColumnName = encodeURIComponent(columnName.trim()); // Encode column name too
+
+      // 3. Log the attempt
+      console.log(`API: Deleting column "${columnName}" from table "${tableName}" (DB ${dbId})...`);
+      // 4. Construct the URL based on backend routes
+      const url = `/meta/databases/${dbId}/tables/${encodedTableName}/columns/${encodedColumnName}`;
+
+      // 5. Make the DELETE request using apiClient
+      // DELETE requests typically don't have a request body
+      const res = await apiClient.delete<any>(url); // Use DELETE method
+
+      // 6. Log success
+      console.log(`API: Column "${columnName}" deleted from "${tableName}" (DB ${dbId}) successfully.`);
+
+      // 7. Return backend response (might be { message: ... } or empty for 204)
+      return res.data;
+
+  } catch (err) {
+      // 8. Handle errors using the shared handler
+      throw handleApiError(
+          err as AxiosError | Error,
+          `deleteColumn(DB ID: ${dbId}, Table: ${tableName}, Column: ${columnName})` // Context string
+      );
+  }
+};
+
 
 export const deleteRecord = async (
     dbId: number,
@@ -481,18 +525,21 @@ export const uploadData = async (
     if (!tableName) {
         throw new Error("Table name is required for uploading data.");
     }
-    if (!formData.has('file')) { // Simple check if 'file' key exists
-       throw new Error("FormData must contain a 'file' entry.");
-    }
+    const file = formData.get('file');
+    if (!file || !(file instanceof File)) {
+      throw new Error("FormData must contain a valid 'file' entry.");
+  }
 
     try {
         const encodedTableName = encodeURIComponent(tableName.trim());
         console.log(`API: Uploading data for table "${tableName}" in DB ID ${dbId}...`);
 
-        // *** IMPORTANT: Use the correct endpoint with dbId ***
+        // *** IMPORTANT: Use the correct endpoint with dbId ***   
+        console.log(formData);   
         const response = await apiClient.post<any>(
             `/data/${dbId}/tables/${encodedTableName}/upload`, // Match potential backend route structure
-            formData,                         // Pass FormData directly
+            formData,
+                            // Pass FormData directly
             {
                 // withCredentials is now default for apiClient from Commit 2's setup
                 onUploadProgress: onUploadProgress // Pass the progress callback to Axios

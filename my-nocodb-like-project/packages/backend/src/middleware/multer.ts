@@ -3,14 +3,20 @@ import multer from 'multer';
 
 const storage = multer.memoryStorage();
 
+// middleware/multer.ts
 const fileFilter = (req: any, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
+    // *** THIS LOG IS ESSENTIAL NOW ***
+    console.log(`[Multer Filter] Processing file: name='${file.originalname}', mimetype='${file.mimetype}'`);
     if (file.mimetype === 'text/csv' || file.originalname.toLowerCase().endsWith('.csv')) {
-        cb(null, true); // Accept file
+        console.log(`[Multer Filter] Accepting file.`);
+        cb(null, true);
     } else {
-        cb(new Error('Invalid file type. Only CSV files are allowed.')); // Reject file
+        console.log(`[Multer Filter] REJECTING file.`);
+        // Change this temporarily to see if rejection prevents req.file
+        cb(null, false); // Test this first!
+        // cb(new Error('Invalid file type...')); // This throws an error Multer catches
     }
 };
-
 const limits = {
     fileSize: 50 * 1024 * 1024,
 };
