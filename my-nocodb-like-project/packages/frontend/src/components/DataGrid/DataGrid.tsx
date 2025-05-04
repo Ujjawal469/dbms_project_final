@@ -567,19 +567,20 @@ const DataGrid: React.FC<DataGridProps> = ({ dbId, tableName }) => {
             message.success('Record added successfully!');
             setIsAddModalVisible(false);
 
-            const wasAlreadyOnPage1 = currentPage === 1;
-            const isSortedOrFiltered = sortConfig.field || searchQuery || filterConfig.length > 0 || groupingColumn;
+            const isViewModified = !!sortConfig.field || !!searchQuery || filterConfig.length > 0 || groupingColumn.length > 0;
+            const isOnPage1 = currentPage === 1;
 
-            if (!wasAlreadyOnPage1 || isSortedOrFiltered) {
-
-                console.log("Setting current page to 1 after add.");
-                setCurrentPage(1);
+            if (!isOnPage1 || (isOnPage1 && isViewModified)) {
+                console.log(`Setting current page to 1 after add. Reason: ${!isOnPage1 ? 'Not on page 1' : 'On page 1 with view modifications'}`);
+                if (isOnPage1) {
+                    setRefetchTrigger(c => c + 1);
+                } else {
+                    setCurrentPage(1);
+                }
             } else {
-                // If already on page 1 and no filters/sorts, force refetch of current page using trigger.
-                console.log("Forcing refetch on page 1 after add via trigger.");
+                console.log("On page 1 without view modifications. Forcing refetch of current page via trigger.");
                 setRefetchTrigger(c => c + 1);
             }
-            // Loading state for the data grid will be handled by the triggered useEffect
 
         } catch (errorInfo: any) {
             console.error('DataGrid: Add Row Failed:', errorInfo);
