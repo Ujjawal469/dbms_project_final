@@ -16,9 +16,6 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // --- Core Middleware ---
-
-// CORS: Configure origins carefully for production
-// Ensure credentials (cookies) are allowed from your frontend origin
 app.use(cors({
     origin: process.env.FRONTEND_URL || 'http://localhost:5173', // Your frontend URL
     credentials: true, // <--- IMPORTANT: Allow cookies
@@ -36,32 +33,20 @@ const sessionSecret = process.env.SESSION_SECRET || 'a-default-insecure-secret-k
 
 app.use(session({
     secret: sessionSecret,
-    resave: false, // Don't save session if unmodified
-    saveUninitialized: false, // Don't create session until something stored
+    resave: false,
+    saveUninitialized: false,
     cookie: {
         httpOnly: true, // Prevent client-side JS access
         secure: process.env.NODE_ENV === 'production', // Use secure cookies in production (requires HTTPS)
         maxAge: 1000 * 60 * 60 * 24 * 7, // Example: 7 days
         sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax', // 'none' for cross-site (prod with HTTPS), 'lax' for dev
     },
-    // --- Optional: Session Store (for production) ---
-    // Default is MemoryStore (not suitable for production)
-    // Use connect-pg-simple, connect-redis, etc. for persistent storage
-    // Example using connect-pg-simple (install it first: npm install connect-pg-simple)
-    /*
-    store: new (require('connect-pg-simple')(session))({
-      conString: process.env.DATABASE_URL, // Use your DB connection string
-      tableName: 'user_sessions', // Optional: specify session table name
-      createTableIfMissing: true, // Optional: auto-create table
-    }),
-    */
 }));
 // --- End Session Middleware ---
 
 
 // --- Logging Middleware ---
 app.use((req, res, next) => {
-  // Avoid logging session data directly unless needed for debugging
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.path} (Session UserID: ${req.session?.userId || 'None'})`);
   next();
 });

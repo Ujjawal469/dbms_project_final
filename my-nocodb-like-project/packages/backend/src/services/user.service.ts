@@ -7,16 +7,7 @@ import * as UserInterface from '../interface/user.types';
 
 export type SafeUser = Omit<Prisma.usersGetPayload<{}>, 'password_hash'>;
 
-
 const SALT_ROUNDS = 10; // Cost factor for bcrypt hashing
-
-/**
- * Creates a new user in the database.
- * @param credentials - User signup information.
- * @returns The newly created user object (without password hash).
- * @throws Error if email is already taken or validation fails.
- */
-
 //--------------------------- signup ------------------------------------------------------
 export const signup = async (credentials: UserInterface.SignupCredentials): Promise<SafeUser> => {
   const { username, email, password } = credentials;
@@ -55,13 +46,6 @@ export const signup = async (credentials: UserInterface.SignupCredentials): Prom
   }
 };
 
-/**
- * Authenticates a user based on email and password.
- * @param credentials - User login information.
- * @returns The authenticated user object (without password hash).
- * @throws Error if login fails (user not found, invalid password).
- */
-
 //---------------------------------------- login --------------------------------------------------------
 export const login = async (credentials: UserInterface.LoginCredentials): Promise<SafeUser> => {
   const { email, password } = credentials;
@@ -90,11 +74,6 @@ export const login = async (credentials: UserInterface.LoginCredentials): Promis
   return safeUserData;
 };
 
-/**
- * Finds a user by their ID.
- * @param userId - The ID of the user to find.
- * @returns The user object (without password hash) or null if not found.
- */
 export const findUserById = async (userId: number): Promise<SafeUser | null> => {
     const user = await prisma.users.findUnique({
         where: { user_id: userId },

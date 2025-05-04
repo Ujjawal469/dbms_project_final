@@ -1,3 +1,4 @@
+//done_for_this
 import { Request, Response, NextFunction } from 'express';
 import * as dataService from '../services/data.service';
 import * as metaService from '../services/meta.service';
@@ -167,7 +168,6 @@ export const deleteExistingRow = async (req: Request, res: Response, next: NextF
 
 export const uploadTableData = async (req: Request, res: Response) => {
     try {
-        console.log("hihh ihihhihiih");
         const userId = req.session?.userId;
         if (!userId) {
              return res.status(401).json({ message: 'Unauthorized. Please log in.' });
@@ -175,7 +175,6 @@ export const uploadTableData = async (req: Request, res: Response) => {
         const { tableName } = req.params;
         const dbIdParam = req.params.dbId;
         const file = req.file;
-        console.log(file);
         if (!tableName) {
             return res.status(400).json({ message: 'Table name parameter is required.' });
         }
@@ -192,23 +191,17 @@ export const uploadTableData = async (req: Request, res: Response) => {
         const baseTableName = tableName;
 
         console.log(`CONTROLLER: Upload request received for DB: ${dbId}, Table: ${baseTableName}, User: ${userId}, File: ${file.originalname}`);
-
-        // --- Call Service with ALL FOUR required arguments ---
         const result = await dataService.processCsvUpload(
-            userId,         // 1st argument
-            dbId,           // 2nd argument
-            baseTableName,  // 3rd argument (logical name)
-            file.buffer     // 4th argument (file content)
+            userId,
+            dbId,
+            baseTableName,
+            file.buffer
         );
-
-        // --- Send Response ---
-        // Use the correct flag from the service response ('tableRebuilt')
-        res.status(result.tableRebuilt ? 201 : 200).json(result); // 201 if created/rebuilt
+        res.status(result.tableRebuilt ? 201 : 200).json(result);
 
     } catch (error: any) {
         console.error(`CONTROLLER ERROR processing upload for table ${req.params.tableName} (DB: ${req.params.dbId}):`, error);
-        // Use status code from service error if available, otherwise default based on error type
-        const statusCode = (error as any).statusCode || 500; // statusCode might be set by service validation
+        const statusCode = (error as any).statusCode || 500;
         res.status(statusCode)
            .json({ message: error.message || 'Internal server error during file upload processing.' });
     }

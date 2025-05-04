@@ -18,17 +18,13 @@ Creating an intuitive spreadsheet interface for interaction with relational data
    - Add/edit/delete rows and columns
    - View only their own tables after login
    - Navigate large tables using pagination
-   -* new to add
-   - we plan things
-2. Developed a user authentication system with login and signup functionality.  
-3. Displaying only the tables relevant to the currently logged-in user.  
-4. Focused on building a user-friendly and interactive UI that closely resembles a spreadsheet experience.
-
-We plan to add the following features along with more enhancements as the project progresses:
-1. Organizing primary and foreign keys
-2. Creating different views of a single table (e.g., card view, notes view)  
-3. Data manipulation through Filter, group by, search, and sort functionality
-4. upload as csv table
+   - Developed a user authentication system with login and signup functionality.  
+   - Displaying only the tables relevant to the currently logged-in user.  
+   - Focused on building a user-friendly and interactive UI that closely resembles a spreadsheet experience.
+   - Organizing primary and foreign keys
+   - Creating different views of a single table (e.g., card view, notes view)  
+   - Data manipulation through Filter, group by, search, and sort functionality
+   - upload as csv table
 
 ## Structure
 

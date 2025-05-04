@@ -214,36 +214,29 @@ export const renameDatabase = async (userId: number, dbId: number, rawNewDbName:
 export const deleteDatabase = async (userId: number, dbId: number): Promise<void> => {
     console.log(`SERVICE: Attempting to DELETE database ID ${dbId} and all its contents for User ID ${userId}`);
 
-    // Find all tables associated with this database first
     const tablesToDelete = await prisma.users_database_tables.findMany({
         where: { user_id: userId, db_id: dbId },
-        select: { table_name: true, table_id: true } // Need base name for physical name generation
+        select: { table_name: true, table_id: true }
     });
 
     try {
         await prisma.$transaction(async (tx) => {
-            // 1. Drop all physical tables associated with this DB
             for (const table of tablesToDelete) {
                 const physicalTableName = getPhysicalTableName(table.table_name, userId, dbId);
                 const dropTableSql = `DROP TABLE IF EXISTS "public"."${physicalTableName}";`;
                 console.log(`TX: Executing SQL: ${dropTableSql}`);
-                // Use tx client for transaction context
                 await tx.$executeRawUnsafe(dropTableSql);
                 console.log(`TX: Physical table "${physicalTableName}" dropped (if existed).`);
             }
-
-            // 2. Delete table associations for this DB
             console.log(`TX: Deleting table associations for User ${userId}, DB ID ${dbId}`);
             const deleteTableAssocResult = await tx.users_database_tables.deleteMany({
                 where: { user_id: userId, db_id: dbId },
             });
             console.log(`TX: Deleted ${deleteTableAssocResult.count} table associations.`);
-
-            // 3. Delete the database entry itself
             console.log(`TX: Deleting database entry for User ${userId}, DB ID ${dbId}`);
             await tx.users_database.delete({
                 where: {
-                    user_id_db_id: { // Use composite key
+                    user_id_db_id: {
                         user_id: userId,
                         db_id: dbId,
                     },
@@ -257,15 +250,11 @@ export const deleteDatabase = async (userId: number, dbId: number): Promise<void
     } catch (error: any) {
         console.error(`SERVICE ERROR (deleteDatabase transaction): User ${userId}, DB ID ${dbId}`, error);
         if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
-            // Record to delete not found - maybe DB was already deleted?
              console.warn(`Database with ID ${dbId} or its associations were not found during deletion for user ${userId}. Assuming already deleted.`);
-             // Depending on desired behavior, you might not want to throw an error here
-             // Or throw a specific 'not found' error:
              const notFoundError = new Error(`Database with ID ${dbId} not found for deletion.`);
              (notFoundError as any).statusCode = 404;
              throw notFoundError;
         }
-        // Handle other potential errors during transaction
         throw new Error(`Could not delete database ID ${dbId}. An error occurred during the process.`);
     }
 };
@@ -277,7 +266,6 @@ export const createAndAssociateTable = async (userId: number, dbId: number, rawT
     const baseTableName = validateSqlIdentifier(rawTableName, 'Table'); // Use stricter validator for table name
     console.log(`SERVICE: Attempting to CREATE table "${baseTableName}" in DB ID ${dbId} for User ID ${userId}`);
 
-    // Check if this user/db combination already has a table with this logical name
     const existingAssociation = await prisma.users_database_tables.findFirst({
         where: { user_id: userId, db_id: dbId, table_name: baseTableName }
     });
@@ -287,23 +275,17 @@ export const createAndAssociateTable = async (userId: number, dbId: number, rawT
         throw error;
     }
 
-    // Generate the physical table name
     const physicalTableName = getPhysicalTableName(baseTableName, userId, dbId);
 
-    // Generate next table_id specific to this user and db
     const lastTable = await prisma.users_database_tables.findFirst({
         where: { user_id: userId, db_id: dbId },
         orderBy: { table_id: 'desc' },
         select: { table_id: true }
     });
-    const nextTableId = (lastTable?.table_id ?? 0) + 1; // Start from 1 for the first table in this DB
-
-    // Define SQL to create the physical table (with default PK)
-    // Using BIGSERIAL for potentially many tables/rows across users/dbs
+    const nextTableId = (lastTable?.table_id ?? 0) + 1; 
     const createTableSql = `CREATE TABLE "public"."${physicalTableName}" (serial_num BIGSERIAL PRIMARY KEY);`;
 
     try {
-        // Use transaction to create physical table AND association entry
         const newTableEntry = await prisma.$transaction(async (tx) => {
             console.log("TX: Executing SQL:", createTableSql);
             await tx.$executeRawUnsafe(createTableSql);
@@ -314,26 +296,22 @@ export const createAndAssociateTable = async (userId: number, dbId: number, rawT
                 data: {
                     user_id: userId,
                     db_id: dbId,
-                    table_id: nextTableId, // Use the calculated next ID
-                    table_name: baseTableName, // Store the user-facing name
+                    table_id: nextTableId,
+                    table_name: baseTableName,
                 },
             });
             console.log(`TX: Successfully added table association entry.`);
-            return createdEntry; // Return the created association record
+            return createdEntry;
         });
 
         console.log(`SERVICE: Table "${baseTableName}" (physical: ${physicalTableName}) created and associated successfully in DB ${dbId} for User ${userId}.`);
-        return newTableEntry; // Return the Prisma object for the association
+        return newTableEntry;
 
     } catch (error: any) {
         console.error(`SERVICE ERROR (createAndAssociateTable): User ${userId}, DB ${dbId}, Table "${baseTableName}"`, error);
-
-        // Handle potential conflicts or errors
         if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-            // Unique constraint violation - likely on users_database_tables (user_id, db_id, table_name)
             const conflictError = new Error(`Table "${baseTableName}" is already associated with this database.`);
             (conflictError as any).statusCode = 409;
-            // Attempt cleanup: Drop the physical table if the association failed
             try {
                 await prisma.$executeRawUnsafe(`DROP TABLE IF EXISTS "public"."${physicalTableName}";`);
                 console.warn(`Cleaned up physical table "${physicalTableName}" after association conflict.`);
@@ -342,14 +320,11 @@ export const createAndAssociateTable = async (userId: number, dbId: number, rawT
             }
             throw conflictError;
         }
-        // Handle physical table already exists error (e.g., race condition or leftover table)
         if (error.message?.includes('already exists') || (error.code === '42P07' && error.routine === 'DuplicateTable')) {
             const existsError = new Error(`Physical table "${physicalTableName}" already exists. Naming conflict or previous error?`);
             (existsError as any).statusCode = 409;
-            // Do NOT attempt cleanup here, as the existing table might be valid but unassociated
             throw existsError;
         }
-         // Handle DB not found error if FK constraint exists from users_database_tables to users_database
         if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2003') {
             const fkError = new Error(`Database ID ${dbId} does not exist for user ${userId}.`);
             (fkError as any).statusCode = 404; // Not found
@@ -415,7 +390,6 @@ export const addColumn = async (userId: number, dbId: number, baseTableName: str
 
     console.log(`SERVICE: Adding column "${columnName}" to physical table: ${physicalTableName}`, columnData);
 
-    // Basic type validation (can be expanded)
     const allowedTypesPattern = /^(TEXT|VARCHAR|INTEGER|INT|BIGINT|SERIAL|BIGSERIAL|NUMERIC|DECIMAL|FLOAT|REAL|DOUBLE PRECISION|BOOLEAN|BOOL|DATE|TIMESTAMP|TIMESTAMP WITH TIME ZONE|DATETIME|JSON|JSONB|UUID)(\(\d+(,\d+)?\))?$/i;
     if (!allowedTypesPattern.test(columnData.type)) {
         const typeError = new Error(`Unsupported or invalid column type: ${columnData.type}`);
@@ -423,38 +397,28 @@ export const addColumn = async (userId: number, dbId: number, baseTableName: str
         throw typeError;
     }
 
-    // Construct ALTER TABLE statement
     let sql = `ALTER TABLE "public"."${physicalTableName}" ADD COLUMN "${columnName}" ${columnData.type}`;
 
-    // Handle Nullability
     if (columnData.isNullable === false) {
         sql += ` NOT NULL`;
-        // Warn if adding NOT NULL without DEFAULT to non-empty table (check cannot be easily done here)
         if (columnData.defaultValue === undefined || columnData.defaultValue === null) {
             console.warn(`Adding NOT NULL column "${columnName}" without a default value might fail if table "${physicalTableName}" is not empty.`);
         }
     } else {
-        sql += ` NULL`; // Explicitly adding NULL might not be needed, depends on DB default
+        sql += ` NULL`;
     }
-
-    // Handle Default Value (Basic handling - improve for production)
     if (columnData.defaultValue !== undefined && columnData.defaultValue !== null) {
-        // This quoting/escaping logic is tricky and DB-specific.
-        // Using Prisma's raw query parameterization is generally NOT possible for DEFAULT values.
         let defaultValueSql: string;
         if (typeof columnData.defaultValue === 'string') {
-             // Check for known SQL functions/keywords that shouldn't be quoted
              if (!['CURRENT_TIMESTAMP', 'NOW()', 'uuid_generate_v4()'].includes(columnData.defaultValue.toUpperCase())) {
-                // Basic string quoting, escape single quotes
                 defaultValueSql = `'${columnData.defaultValue.replace(/'/g, "''")}'`;
              } else {
-                 defaultValueSql = columnData.defaultValue; // Assume it's a DB function/keyword
+                 defaultValueSql = columnData.defaultValue;
              }
         } else if (typeof columnData.defaultValue === 'number' || typeof columnData.defaultValue === 'boolean') {
              defaultValueSql = `${columnData.defaultValue}`; // Numbers and booleans don't need quotes
         } else {
              console.warn(`Default value type for "${columnName}" not explicitly handled: ${typeof columnData.defaultValue}. Attempting to use directly.`);
-             // Might fail if it's an object or needs special formatting
              defaultValueSql = `${columnData.defaultValue}`;
         }
         sql += ` DEFAULT ${defaultValueSql}`;
@@ -469,7 +433,6 @@ export const addColumn = async (userId: number, dbId: number, baseTableName: str
 
     console.log("SERVICE: Executing SQL:", sql);
     try {
-        // Verify the table association exists before altering
         const association = await prisma.users_database_tables.findFirst({
             where: { user_id: userId, db_id: dbId, table_name: validatedBaseTableName },
             select: { table_id: true }
@@ -484,7 +447,6 @@ export const addColumn = async (userId: number, dbId: number, baseTableName: str
         console.log(`SERVICE: Column "${columnName}" added successfully to ${physicalTableName}.`);
     } catch (error: any) {
         console.error(`SERVICE ERROR (addColumn) to physical table "${physicalTableName}":`, error);
-        // Handle specific errors
         if ((error.code === '42701' || error.message?.includes('already exists')) && error.message?.includes('column')) {
             const existsError = new Error(`Column "${columnName}" already exists in table "${validatedBaseTableName}".`);
             (existsError as any).statusCode = 409; // Conflict
@@ -541,8 +503,6 @@ export const getTableSchema = async (userId: number, dbId: number, baseTableName
             AND c.table_name = ${physicalTableName} -- Parameter binding for table name
           ORDER BY c.ordinal_position;
         `;
-
-         // Post-process results (Booleans, check for autogenerated PK)
          return columnsResult.map(col => {
              const isPrimaryKey = Boolean(col.isPrimaryKey);
              let isAutoGenerated = false;
@@ -554,18 +514,16 @@ export const getTableSchema = async (userId: number, dbId: number, baseTableName
                  isNullable: Boolean(col.isNullable),
                  isPrimaryKey: isPrimaryKey,
                  isForeignKey: Boolean(col.isForeignKey),
-                 // Add isAutoGenerated flag if needed by frontend
                  ...(isAutoGenerated && { isAutoGenerated: true })
              };
          });
 
     } catch (error: any) {
         console.error(`SERVICE ERROR (getTableSchema) for physical table "${physicalTableName}":`, error);
-        if (error.code === '42P01' || error.message?.includes("does not exist")) { // PostgreSQL physical table not found
-            // This could mean the physical table is missing despite the association existing (data inconsistency)
+        if (error.code === '42P01' || error.message?.includes("does not exist")) {
             throw new Error(`Physical table "${physicalTableName}" not found, but association exists. Data inconsistency?`);
         }
-         if ((error as any).statusCode === 404) { // Propagate the 404 from the association check
+         if ((error as any).statusCode === 404) {
              throw error;
          }
         throw new Error(`Could not fetch schema for table "${validatedBaseTableName}" (physical: ${physicalTableName}). DB Error: ${error.message}`);
@@ -577,33 +535,29 @@ export const deleteTableAndAssociation = async (userId: number, dbId: number, ba
     const validatedBaseTableName = validateSqlIdentifier(baseTableName, 'Table');
     const physicalTableName = getPhysicalTableName(validatedBaseTableName, userId, dbId);
     console.log(`SERVICE: Attempting to DELETE table "${validatedBaseTableName}" (physical: ${physicalTableName}) in DB ${dbId} for User ${userId}`);
-
-    // Find the association first to ensure it belongs to the user/db
     const association = await prisma.users_database_tables.findFirst({
         where: {
             user_id: userId,
             db_id: dbId,
             table_name: validatedBaseTableName,
         },
-        select: { table_id: true } // Only need to confirm existence and get ID
+        select: { table_id: true }
     });
 
     if (!association) {
-        // Table association doesn't exist, maybe already deleted or never existed for this db/user
         const error = new Error(`Table "${validatedBaseTableName}" not found in database ID ${dbId} for this user.`);
         (error as any).statusCode = 404;
         throw error;
     }
 
-    const tableId = association.table_id; // Get the specific table_id for deletion clarity
+    const tableId = association.table_id;
 
     try {
         await prisma.$transaction(async (tx) => {
-            // 1. Delete the association entry using its specific composite key
             console.log(`TX: Deleting association for User ${userId}, DB ${dbId}, Table ID ${tableId}, Name "${validatedBaseTableName}"`);
             await tx.users_database_tables.delete({
                 where: {
-                    user_id_db_id_table_id: { // Use the @@id defined in your schema.prisma
+                    user_id_db_id_table_id: {
                         user_id: userId,
                         db_id: dbId,
                         table_id: tableId
@@ -611,8 +565,6 @@ export const deleteTableAndAssociation = async (userId: number, dbId: number, ba
                 },
             });
             console.log(`TX: Association deleted.`);
-
-            // 2. Drop the physical table
             const dropTableSql = `DROP TABLE IF EXISTS "public"."${physicalTableName}";`;
             console.log("TX: Executing SQL:", dropTableSql);
             await tx.$executeRawUnsafe(dropTableSql);
@@ -624,9 +576,7 @@ export const deleteTableAndAssociation = async (userId: number, dbId: number, ba
     } catch (error: any) {
         console.error(`SERVICE ERROR (deleteTable transaction): User ${userId}, DB ${dbId}, Table "${validatedBaseTableName}"`, error);
         if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
-            // Record to delete not found - Association might have been deleted between the check and the transaction
              console.warn(`Table association for "${validatedBaseTableName}" (ID: ${tableId}) vanished before deletion completed.`);
-             // Attempt to drop the physical table anyway, in case it's orphaned
              try {
                  await prisma.$executeRawUnsafe(`DROP TABLE IF EXISTS "public"."${physicalTableName}";`);
                  console.warn(`Attempted to drop physical table "${physicalTableName}" after association deletion failed/vanished.`);
@@ -637,7 +587,6 @@ export const deleteTableAndAssociation = async (userId: number, dbId: number, ba
             (notFoundError as any).statusCode = 404;
              throw notFoundError;
         }
-        // Handle other potential transaction errors
         throw new Error(`Could not delete table "${validatedBaseTableName}". An error occurred during the process.`);
     }
 };
@@ -648,7 +597,6 @@ export const renameTableAndAssociation = async (userId: number, dbId: number, ol
 
     if (oldBaseTableName === newBaseTableName) {
         console.log(`SERVICE: Rename request ignored: old name "${oldBaseTableName}" and new name "${newBaseTableName}" are the same.`);
-        // If names are same, just return the current association details
         const currentTable = await prisma.users_database_tables.findFirst({
             where: { user_id: userId, db_id: dbId, table_name: oldBaseTableName },
         });
@@ -661,8 +609,6 @@ export const renameTableAndAssociation = async (userId: number, dbId: number, ol
     }
 
     console.log(`SERVICE: Attempting to RENAME table "${oldBaseTableName}" to "${newBaseTableName}" in DB ${dbId} for User ${userId}`);
-
-    // 1. Find the existing association for the old name
     const oldAssociation = await prisma.users_database_tables.findFirst({
         where: { user_id: userId, db_id: dbId, table_name: oldBaseTableName },
     });
@@ -671,9 +617,7 @@ export const renameTableAndAssociation = async (userId: number, dbId: number, ol
         (error as any).statusCode = 404;
         throw error;
     }
-    const tableIdToUpdate = oldAssociation.table_id; // Get the table_id
-
-    // 2. Check if the NEW base name already exists for this user/db
+    const tableIdToUpdate = oldAssociation.table_id;
     const existingNewAssociation = await prisma.users_database_tables.findFirst({
         where: { user_id: userId, db_id: dbId, table_name: newBaseTableName },
         select: { table_id: true } // Only need to check existence
@@ -684,16 +628,12 @@ export const renameTableAndAssociation = async (userId: number, dbId: number, ol
        throw error;
    }
 
-    // 3. Generate old and new physical names
     const oldPhysicalTableName = getPhysicalTableName(oldBaseTableName, userId, dbId);
     const newPhysicalTableName = getPhysicalTableName(newBaseTableName, userId, dbId);
-
-    // 4. Check if the target PHYSICAL table name already exists (important!)
     try {
         const tableExistsCheckSql = `SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = $1);`;
         const newTableExistsResult = await prisma.$queryRawUnsafe<{ exists: boolean }[]>(tableExistsCheckSql, newPhysicalTableName);
         if (newTableExistsResult?.[0]?.exists) {
-            // This indicates a potential naming collision or an orphaned physical table
             const error = new Error(`A physical table named "${newPhysicalTableName}" already exists. Cannot rename due to conflict.`);
             (error as any).statusCode = 409;
             throw error;
@@ -702,33 +642,28 @@ export const renameTableAndAssociation = async (userId: number, dbId: number, ol
         console.error(`SERVICE ERROR checking existence of potential new physical table name "${newPhysicalTableName}":`, checkError);
         throw new Error(`Failed to verify availability of the new physical table name.`);
     }
-
-    // 5. Perform rename within a transaction
     try {
         const updatedAssociation = await prisma.$transaction(async (tx) => {
-            // a. Rename the physical table
             const renameTableSql = `ALTER TABLE "public"."${oldPhysicalTableName}" RENAME TO "${newPhysicalTableName}";`;
             console.log("TX: Executing SQL:", renameTableSql);
             await tx.$executeRawUnsafe(renameTableSql);
             console.log(`TX: Physical table "${oldPhysicalTableName}" renamed to "${newPhysicalTableName}".`);
-
-            // b. Update the association record's table_name using its specific ID
             console.log(`TX: Updating association for User ${userId}, DB ${dbId}, Table ID ${tableIdToUpdate} from "${oldBaseTableName}" to "${newBaseTableName}"`);
             const updateResult = await tx.users_database_tables.update({
                 where: {
-                    user_id_db_id_table_id: { // Use the composite @@id
+                    user_id_db_id_table_id: {
                         user_id: userId,
                         db_id: dbId,
                         table_id: tableIdToUpdate,
                     },
                 },
                 data: {
-                    table_name: newBaseTableName, // Update the logical name
+                    table_name: newBaseTableName,
                 },
             });
 
             console.log(`TX: Association updated.`);
-            return updateResult; // Return the updated association record
+            return updateResult;
         });
 
         console.log(`SERVICE: Successfully renamed table "${oldBaseTableName}" to "${newBaseTableName}" (physical: ${newPhysicalTableName}) and updated association.`);
@@ -736,11 +671,8 @@ export const renameTableAndAssociation = async (userId: number, dbId: number, ol
 
     } catch (error: any) {
         console.error(`SERVICE ERROR (renameTable transaction): User ${userId}, DB ${dbId}, "${oldBaseTableName}" -> "${newBaseTableName}"`, error);
-
-        // Attempt to rollback physical rename if association update fails
         const attemptPhysicalRollback = async () => {
              try {
-                 // Check if the NEW physical table exists before trying to rename back
                  const checkNewExistsSql = `SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = $1);`;
                  const newExists = await prisma.$queryRawUnsafe<{ exists: boolean }[]>(checkNewExistsSql, newPhysicalTableName);
                  if (newExists?.[0]?.exists) {
@@ -757,31 +689,25 @@ export const renameTableAndAssociation = async (userId: number, dbId: number, ol
          };
 
         if (error instanceof Prisma.PrismaClientKnownRequestError) {
-            // Unique constraint violation on update (likely (user_id, db_id, table_name))
             if (error.code === 'P2002') {
                  const conflictError = new Error(`Rename failed: The name "${newBaseTableName}" became associated concurrently.`);
                  (conflictError as any).statusCode = 409;
-                 await attemptPhysicalRollback(); // Try to undo physical rename
+                 await attemptPhysicalRollback();
                  throw conflictError;
             }
-            // Record to update not found (association vanished)
              if (error.code === 'P2025') {
                  const notFoundError = new Error(`Rename failed: Original table association "${oldBaseTableName}" vanished before update completed.`);
                  (notFoundError as any).statusCode = 404;
-                  await attemptPhysicalRollback(); // Try to undo physical rename
+                  await attemptPhysicalRollback();
                  throw notFoundError;
              }
         } else if (error.message?.includes('already exists') || (error.code === '42P07' && error.routine === 'RenameTable')) {
-             // Physical table rename conflict (target name exists)
              const conflictError = new Error(`Rename failed: Target physical table "${newPhysicalTableName}" already exists (possibly created concurrently).`);
              (conflictError as any).statusCode = 409;
-             // No physical rollback needed here as the rename likely failed before executing
              throw conflictError;
         } else if (error.code === '42P01' || error.message?.includes('does not exist')) {
-             // Source physical table missing
              const sourceMissingError = new Error(`Rename failed: Source physical table "${oldPhysicalTableName}" does not exist.`);
              (sourceMissingError as any).statusCode = 404;
-             // Clean up potentially orphaned association
              try {
                  await prisma.users_database_tables.delete({
                      where: { user_id_db_id_table_id: { user_id: userId, db_id: dbId, table_id: tableIdToUpdate } }
@@ -792,7 +718,6 @@ export const renameTableAndAssociation = async (userId: number, dbId: number, ol
              }
              throw sourceMissingError;
         }
-        // Generic error
         throw new Error(`Could not rename table "${oldBaseTableName}" to "${newBaseTableName}". An error occurred: ${error.message}`);
     }
 };
@@ -812,32 +737,23 @@ export const deleteTableColumn = async (
     const safeColumnName = `"${columnName}"`;
 
     console.log(`SERVICE: Validating request to delete column ${safeColumnName} from physical table ${safePhysicalTableName}`);
-
-    // --- Validation ---
-    // You might need a dedicated connection/transaction for these checks depending on your DB client setup
-
-    // 1. Check if Table Exists (and user has access - implicitly checked by getPhysicalTableName potentially)
     try {
-        // Use information_schema for portability
         const tableCheck = await prisma.$queryRawUnsafe<Array<{ exists: boolean }>>(
             `SELECT EXISTS (
                 SELECT 1 FROM information_schema.tables
                 WHERE table_schema = 'public' -- Adjust schema if needed
                 AND table_name = $1
             );`,
-            physicalTableName // Use unquoted name for parameter binding
+            physicalTableName
         );
         if (!tableCheck || !tableCheck[0]?.exists) {
             console.error(`Table "${baseTableName}" (physical: ${physicalTableName}) not found.`, 404);
         }
     } catch(err: any) {
-        // Handle potential query errors during check
         console.error(`SERVICE ERROR: Failed to check existence of table ${physicalTableName}`, err);
         console.error(`Failed to verify table "${baseTableName}" existence.`, 500);
     }
 
-
-    // 2. Check if Column Exists
     let isPrimaryKey = false;
     try {
         const columnCheck = await prisma.$queryRawUnsafe<Array<{ column_name: string, is_primary_key: string | null }>>(
@@ -857,14 +773,13 @@ export const deleteTableColumn = async (
             WHERE col.table_schema = 'public' -- Adjust schema if needed
             AND col.table_name = $1
             AND col.column_name = $2;`,
-            physicalTableName, // Use unquoted names for parameter binding
+            physicalTableName,
             columnName
         );
 
         if (!columnCheck || columnCheck.length === 0) {
             console.error(`Column "${columnName}" not found in table "${baseTableName}".`, 404);
         }
-        // Check if the column is part of a primary key constraint
         isPrimaryKey = !!columnCheck[0].is_primary_key;
 
     } catch(err: any) {
@@ -874,25 +789,15 @@ export const deleteTableColumn = async (
 
     try {
         console.log(`SERVICE: Executing ALTER TABLE ${safePhysicalTableName} DROP COLUMN ${safeColumnName}`);
-
-        // Use $executeRawUnsafe as table/column names are dynamic but validated/quoted
         await prisma.$executeRawUnsafe(`ALTER TABLE ${safePhysicalTableName} DROP COLUMN ${safeColumnName}`);
 
         console.log(`SERVICE: Column ${safeColumnName} successfully dropped from ${safePhysicalTableName}`);
 
-        // --- Optional: Update your application's metadata ---
-        // If you store column definitions separately (e.g., in Users_database_table_columns)
-        // you should delete the corresponding metadata entry here *after* the physical drop succeeds.
-        // await deleteColumnMetadata(userId, dbId, baseTableName, columnName);
-
     } catch (dbError: any) {
         console.error(`SERVICE ERROR: Failed to drop column ${safeColumnName} from ${safePhysicalTableName}`, dbError);
-        // Check for specific DB errors if needed (e.g., column involved in constraints/dependencies)
-        if (dbError.code === '42703') { // PostgreSQL: column does not exist (should have been caught above, but belt-and-braces)
+        if (dbError.code === '42703') {
             console.error(`Column "${columnName}" could not be found during delete operation.`, 404);
         }
-        // Add checks for errors related to dependencies (foreign keys, indexes) if necessary
-        // E.g., PostgreSQL might return 2BP01 (dependent objects exist) - consider using DROP COLUMN ... CASCADE with caution
         console.error(`Database error while deleting column "${columnName}": ${dbError.message || 'Unknown DB error'}`, 500);
     }
 };

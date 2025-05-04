@@ -481,7 +481,6 @@ const Sidebar: React.FC<SidebarProps> = ({
       if (loadingDatabases && databases.length === 0) {
           return <div style={{ padding: '20px', textAlign: 'center' }}><Spin tip="Loading databases..." /></div>;
       }
-      // Show error only if loading is finished and still no databases
       if (!loadingDatabases && databaseError && databases.length === 0) {
           return <div style={{ padding: '10px' }}>
               <Alert message={databaseError} type="error" showIcon action={<Button size="small" type="link" onClick={fetchUserDatabases}>Retry</Button>} />
@@ -500,7 +499,6 @@ const Sidebar: React.FC<SidebarProps> = ({
       if (selectedDatabaseId && selectedTableName) {
            currentSelectedKeys.push(`table-${selectedDatabaseId}-${selectedTableName}`);
       }
-      // No need to select the SubMenu key itself in `selectedKeys`
       
   
       return (
@@ -514,7 +512,6 @@ const Sidebar: React.FC<SidebarProps> = ({
           >
               {databases.map(db => {
                   const tablesState = tablesByDb[db.db_id];
-                  // Use nullish coalescing for safer defaults if tablesState is undefined initially
                   const isLoadingTables = tablesState?.loading ?? false;
                   const tablesError = tablesState?.error;
                   const tablesData = tablesState?.data || [];
@@ -528,13 +525,11 @@ const Sidebar: React.FC<SidebarProps> = ({
                            icon={<DatabaseOutlined />}
                            title={
                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-                                   {/* Highlight title slightly if DB selected but no table */}
                                    <Text ellipsis style={{ flexGrow: 1, marginRight: '8px', cursor: 'pointer', fontWeight: isDbSelected && !selectedTableName ? 600 : 400 }} title={db.db_name}>
                                        {db.db_name}
                                    </Text>
-                                   {/* Ensure stopPropagation on the Dropdown trigger */}
                                    <Dropdown
-                                       overlay={() => renderDatabaseActions(db)} // Use callback to generate menu on demand
+                                       overlay={() => renderDatabaseActions(db)}
                                        trigger={['click']}
                                        placement="bottomRight"
                                       >
@@ -550,7 +545,6 @@ const Sidebar: React.FC<SidebarProps> = ({
                                </div>
                            }
                        >
-                          {/* === START: Improved Content Rendering Inside SubMenu === */}
   
                           {isLoadingTables && (
                               // Show a loading indicator centered within the submenu item padding
@@ -579,15 +573,12 @@ const Sidebar: React.FC<SidebarProps> = ({
                           )}
   
                           {!isLoadingTables && !tablesError && tablesData.length === 0 && (
-                              // Show an empty state if loading finished, no error, but no tables
                               <Menu.Item key={`empty-${db.db_id}`} disabled style={{ paddingLeft: '48px', height: 'auto', lineHeight: 'normal', cursor: 'default' }}>
                                   <Empty
                                       image={Empty.PRESENTED_IMAGE_SIMPLE}
                                       description={<span style={{fontSize: '12px', color: '#888'}}>No tables</span>}
                                       style={{ padding: '8px 0' }}
                                   >
-                                      {/* Optional: Add "Create Table" button directly here? */}
-                                       {/* <Button size="small" type="link" onClick={(e) => {e.stopPropagation(); showAddTableModal(db.db_id);}}>Create one?</Button> */}
                                   </Empty>
                               </Menu.Item>
                           )}

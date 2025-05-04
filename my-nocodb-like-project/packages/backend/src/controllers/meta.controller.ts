@@ -1,3 +1,4 @@
+//done_for_this
 import { Request, Response, NextFunction } from 'express';
 import * as metaService from '../services/meta.service';
 
@@ -29,64 +30,34 @@ export const createDatabase = async (req: Request, res: Response, next: NextFunc
 
 export const deleteTableColumn = async (req: Request, res: Response, next: NextFunction): Promise<void | Response> => { // Added | Response type
     try {
-        // 1. Authentication
-        const userId = req.session?.userId; // Or req.user.id
+        const userId = req.session?.userId;
         if (!userId) {
             console.warn('CONTROLLER: Attempt to delete column without authentication.');
-            // Direct response for 401
             return res.status(401).json({ message: 'Unauthorized. Please log in.' });
         }
-
-        // 2. Extract and Validate Path Parameters
         const { dbId: dbIdParam, tableName: baseTableNameParam, columnName: columnNameParam } = req.params;
-
         const dbId = parseInt(dbIdParam, 10);
         if (isNaN(dbId)) {
-            // Direct response for 400
             return res.status(400).json({ message: 'Invalid Database ID provided.' });
         }
-
         if (!baseTableNameParam || typeof baseTableNameParam !== 'string' || baseTableNameParam.trim().length === 0) {
-             // Direct response for 400
             return res.status(400).json({ message: 'Table name parameter is required.' });
         }
         const baseTableName = baseTableNameParam.trim();
-
         if (!columnNameParam || typeof columnNameParam !== 'string' || columnNameParam.trim().length === 0) {
-             // Direct response for 400
             return res.status(400).json({ message: 'Column name parameter is required.' });
         }
         const columnName = columnNameParam.trim();
 
         console.log(`CONTROLLER: Attempting DELETE column "${columnName}" from table "${baseTableName}" in DB ${dbId} for User ${userId}`);
-
-        // 3. Call Service Layer
-        // Service layer might still throw errors (e.g., DB connection issues, actual 404s found during query, etc.)
-        // Specific AppErrors like "Cannot delete PK" (400) or "Not Found" (404) could be caught here
-        // OR the service can throw them and they'll be caught by the main catch block below.
-        // Let's assume service throws errors and we catch them below.
         await metaService.deleteTableColumn(userId, dbId, baseTableName, columnName);
 
         console.log(`CONTROLLER: Column "${columnName}" deleted successfully from table "${baseTableName}" (DB ${dbId})`);
-
-        // 4. Send Success Response
         res.status(200).json({
             message: `Column "${columnName}" deleted successfully from table "${baseTableName}".`
         });
-        // Or: res.status(204).send();
-
     } catch (error: any) {
-        // Log the error with controller context
         console.error(`CONTROLLER ERROR (deleteTableColumn): User ${req.session?.userId}, DB ${req.params.dbId}, Table "${req.params.tableName}", Column "${req.params.columnName}"`, error);
-
-        // Check if it's a specific error thrown by the service layer that we want to map
-        // to a specific client response (if using a custom error class like AppError)
-        // Example:
-        // if (error instanceof AppError) {
-        //    return res.status(error.statusCode).json({ message: error.message });
-        // }
-
-        // Otherwise, pass to the default Express error handler (for 500s or unhandled service errors)
         next(error);
     }
 };

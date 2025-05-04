@@ -4,11 +4,11 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from "react-router-dom";
 import { Layout, Typography, Spin, Alert, message,Empty , Tag} from 'antd'; // Added message
 import { DatabaseOutlined, TableOutlined } from '@ant-design/icons';
-import Sidebar from './components/Sidebar/Sidebar';         // Adjust path if needed
-import DataGrid from './components/DataGrid/DataGrid';         // Adjust path if needed
-import GalleryView from './components/GalleryView';     // Adjust path if needed (IMPORT THIS)
-import * as api from './api';                            // Adjust path if needed
-import './css_files/dashboard.css';                     // Ensure this CSS file exists and is styled
+import Sidebar from './components/Sidebar/Sidebar';
+import DataGrid from './components/DataGrid/DataGrid';
+import GalleryView from './components/GalleryView';
+import * as api from './api'; 
+import './css_files/dashboard.css';
 
 const { Header, Content, Sider } = Layout;
 const { Title, Text } = Typography;
@@ -56,32 +56,26 @@ const Dashboard: React.FC = () => {
     const handleSelectDatabase = useCallback((dbId: number | null) => {
         console.log("Dashboard: Database selected:", dbId);
         setSelectedDbId(dbId);
-        setSelectedTableName(null);   // Clear table selection
-        setCurrentViewType('grid'); // Reset view to grid
-    }, []); // No dependencies needed
+        setSelectedTableName(null);
+        setCurrentViewType('grid');
+    }, []);
 
     const handleSelectTable = useCallback((dbId: number | null, tableName: string | null) => {
         console.log(`Dashboard: Table selected: ${tableName} in DB: ${dbId}`);
         if (tableName && dbId) {
-             // Update DB ID if it changed (e.g., direct link simulation)
             if (dbId !== selectedDbId) {
                  setSelectedDbId(dbId);
             }
             setSelectedTableName(tableName);
-            setCurrentViewType('grid'); // Reset view to grid when table selected
+            setCurrentViewType('grid');
         } else {
-            setSelectedTableName(null); // Clear table if null is passed
-            // Keep current DbId selected, view type will reset if DB is clicked again
+            setSelectedTableName(null);
         }
     }, [selectedDbId]); // Dependency needed for comparison
 
     const handleSetViewType = useCallback((dbId: number, tableName: string, viewType: 'grid' | 'gallery') => {
-         // Safety check: Ensure the request is for the currently selected context
          if (dbId !== selectedDbId || tableName !== selectedTableName) {
               console.warn(`View type change requested for non-selected table/db (${dbId}/${tableName}). Context may be out of sync. Applying anyway.`);
-              // Optionally force selection:
-              // setSelectedDbId(dbId);
-              // setSelectedTableName(tableName);
          }
          console.log(`Dashboard: Setting view type to ${viewType} for ${selectedDbId}/${selectedTableName}`);
          setCurrentViewType(viewType); // Update the view state

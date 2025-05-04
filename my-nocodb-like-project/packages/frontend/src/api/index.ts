@@ -5,11 +5,8 @@ import {
     LoginCredentials, SignupCredentials, LoggedInUser,
     ApiDatabase, ApiTableInfo, AddTableResponse, RenameTableResponse,
     AddDatabaseResponse, RenameDatabaseResponse, FilterCondition
-    // Make sure all these types are defined and exported from './types'
 } from './types';
 
-// --- API Base URL Setup ---
-// Use the || '/api' fallback from Commit 2 as it's safer if .env is missing
 const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 console.log("🌐 API Base URL:", API_BASE_URL);
 
@@ -22,14 +19,12 @@ const apiClient = axios.create({
 });
 
 // --- Error Handling ---
-// Use the refined error handler from Commit 2
 const handleApiError = (error: AxiosError | Error, context: string): Error => {
     let errorMessage = `Unknown error in ${context}`;
     let statusCode: number | undefined = undefined;
 
     if (axios.isAxiosError(error)) {
         statusCode = error.response?.status;
-        // Prioritize specific error/message fields from backend response
         const backendError = error.response?.data?.error || error.response?.data?.message;
         errorMessage = backendError || error.message || `Request failed with status ${statusCode || 'unknown'}`;
         console.error(`🚫 API Error (${context}) - Status: ${statusCode}, Message: ${errorMessage}`, error.response?.data);
@@ -39,10 +34,7 @@ const handleApiError = (error: AxiosError | Error, context: string): Error => {
     } else {
         console.error(`🚫 Unknown Error Type (${context}):`, error);
     }
-    // Create a new error object to preserve stack trace if needed, but with better message
     const customError = new Error(errorMessage);
-    // Optionally attach status code if needed downstream
-    // (customError as any).statusCode = statusCode;
     return customError;
 };
 
@@ -52,15 +44,11 @@ const handleApiError = (error: AxiosError | Error, context: string): Error => {
 export const checkLoginStatus = async (): Promise<{ loggedIn: boolean, user: LoggedInUser | null }> => {
     try {
         console.log("API: Checking login status...");
-        // Use endpoint from Commit 2
         const response = await apiClient.get<{ loggedIn: boolean, user: LoggedInUser | null }>('user/isLoggedIn');
-
-        // Handle potential string IDs (from Commit 2)
         if (response.data?.user?.user_id) {
             response.data.user.user_id = Number(response.data.user.user_id);
         }
 
-        // Check boolean flag as well
         if (response.data?.loggedIn && response.data?.user) {
             console.log(`API: User is logged in: ${response.data.user.username} (ID: ${response.data.user.user_id})`);
             return response.data as { loggedIn: true, user: LoggedInUser };
@@ -430,13 +418,11 @@ export const updateRecord = async (
         const encodedTableName = encodeURIComponent(tableName.trim());
         const encodedPk = encodeURIComponent(String(pkValue));
         console.log(`API: Updating record in table "${tableName}" (DB: ${dbId}, PK: ${pkValue})...`, data);
-        // Clean data (remove undefined) - good practice from Commit 1
         const cleanData = Object.entries(data).reduce((acc, [key, value]) => {
             if (value !== undefined) acc[key] = value;
             return acc;
         }, {} as Record<string, any>);
 
-        // Use endpoint from Commit 2
         const res = await apiClient.put<any>(`/data/${dbId}/tables/${encodedTableName}/${encodedPk}`, cleanData);
         console.log(`API: Record updated in "${tableName}" (DB: ${dbId}, PK: ${pkValue}) successfully.`);
         // Consider adding Number() conversion if PK is returned and might be string
@@ -453,35 +439,22 @@ export const deleteColumn = async (
   dbId: number,
   tableName: string,
   columnName: string
-): Promise<any> => { // Return type matches other functions for consistency
-  // 1. Input Validation (matching other functions)
+): Promise<any> => {
   if (!dbId || !tableName || !columnName) {
-      // Throw simple error, handled by caller or global handler eventually
       throw new Error("DB ID, Table name, and Column name are required for deleting a column.");
   }
 
   try {
-      // 2. Encode parameters for URL path
       const encodedTableName = encodeURIComponent(tableName.trim());
-      const encodedColumnName = encodeURIComponent(columnName.trim()); // Encode column name too
+      const encodedColumnName = encodeURIComponent(columnName.trim());
 
-      // 3. Log the attempt
       console.log(`API: Deleting column "${columnName}" from table "${tableName}" (DB ${dbId})...`);
-      // 4. Construct the URL based on backend routes
       const url = `/meta/databases/${dbId}/tables/${encodedTableName}/columns/${encodedColumnName}`;
-
-      // 5. Make the DELETE request using apiClient
-      // DELETE requests typically don't have a request body
-      const res = await apiClient.delete<any>(url); // Use DELETE method
-
-      // 6. Log success
+      const res = await apiClient.delete<any>(url);
       console.log(`API: Column "${columnName}" deleted from "${tableName}" (DB ${dbId}) successfully.`);
-
-      // 7. Return backend response (might be { message: ... } or empty for 204)
       return res.data;
 
   } catch (err) {
-      // 8. Handle errors using the shared handler
       throw handleApiError(
           err as AxiosError | Error,
           `deleteColumn(DB ID: ${dbId}, Table: ${tableName}, Column: ${columnName})` // Context string
@@ -502,7 +475,6 @@ export const deleteRecord = async (
        const encodedTableName = encodeURIComponent(tableName.trim());
        const encodedPk = encodeURIComponent(String(pkValue));
        console.log(`API: Deleting record from table "${tableName}" (DB: ${dbId}, PK: ${pkValue})...`);
-       // Use endpoint from Commit 2
        await apiClient.delete(`/data/${dbId}/tables/${encodedTableName}/${encodedPk}`);
        console.log(`API: Record deleted from "${tableName}" (DB: ${dbId}, PK: ${pkValue}) successfully.`);
    } catch (err) {
@@ -511,14 +483,12 @@ export const deleteRecord = async (
 };
 
 
-// --- File Upload --- (Adding from Commit 1 and adapting for dbId)
-
 export const uploadData = async (
-    dbId: number, // <-- Add dbId parameter
+    dbId: number,
     tableName: string,
-    formData: FormData, // Expect FormData containing the file
-    onUploadProgress?: (progressEvent: AxiosProgressEvent) => void // Optional progress callback
-): Promise<any> => { // Backend response might vary, use 'any' or a specific type
+    formData: FormData,
+    onUploadProgress?: (progressEvent: AxiosProgressEvent) => void
+): Promise<any> => {
     if (!dbId) {
          throw new Error("Database ID is required for uploading data.");
     }
@@ -533,25 +503,19 @@ export const uploadData = async (
     try {
         const encodedTableName = encodeURIComponent(tableName.trim());
         console.log(`API: Uploading data for table "${tableName}" in DB ID ${dbId}...`);
-
-        // *** IMPORTANT: Use the correct endpoint with dbId ***   
         console.log(formData);   
         const response = await apiClient.post<any>(
-            `/data/${dbId}/tables/${encodedTableName}/upload`, // Match potential backend route structure
+            `/data/${dbId}/tables/${encodedTableName}/upload`,
             formData,
-                            // Pass FormData directly
             {
-                // withCredentials is now default for apiClient from Commit 2's setup
-                onUploadProgress: onUploadProgress // Pass the progress callback to Axios
-                // No need to explicitly set Content-Type header here, Axios handles it for FormData
+                onUploadProgress: onUploadProgress
             }
         );
 
         console.log(`API: Data upload for "${tableName}" (DB ${dbId}) successful.`);
-        return response.data; // Return the response data from the backend
+        return response.data;
 
     } catch (err) {
-        // Use existing error handler
         throw handleApiError(err as AxiosError | Error, `uploadData(DB ID: ${dbId}, Table: ${tableName})`);
     }
 };

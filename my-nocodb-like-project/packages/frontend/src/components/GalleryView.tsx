@@ -2,32 +2,28 @@
 
 import React, { useState, useEffect } from 'react';
 import { Card, Spin, Alert, Empty, Pagination, Row, Col, Typography, Tooltip, Tag } from 'antd';
-import * as api from '../api'; // Adjust path as needed
-import { ApiColumnSchema } from '../api/types'; // Adjust path as needed
+import * as api from '../api';
+import { ApiColumnSchema } from '../api/types';
 import dayjs from 'dayjs';
 
-const { Text, Paragraph, Title } = Typography; // <-- Add Title here
+const { Text, Paragraph, Title } = Typography;
 
 interface GalleryViewProps {
-    dbId: number; // Assume non-null when this component is rendered
-    tableName: string; // Assume non-null
+    dbId: number;
+    tableName: string;
 }
 
-// Define how many cards to show per page
 const GALLERY_PAGE_SIZE = 8;
 
 const GalleryView: React.FC<GalleryViewProps> = ({ dbId, tableName }) => {
-    // 2a. STATE: Manage schema, data, pagination, loading, error
     const [schema, setSchema] = useState<ApiColumnSchema[]>([]);
-    const [data, setData] = useState<any[]>([]); // Data for the current page
+    const [data, setData] = useState<any[]>([]);
     const [totalRows, setTotalRows] = useState<number>(0);
     const [currentPage, setCurrentPage] = useState<number>(1);
     const [loadingSchema, setLoadingSchema] = useState<boolean>(true);
     const [loadingData, setLoadingData] = useState<boolean>(true);
     const [error, setError] = useState<string | null>(null);
     const [primaryKeyName, setPrimaryKeyName] = useState<string | null>(null);
-
-    // 2b. FETCH SCHEMA: Get column names and identify PK (similar to DataGrid)
     useEffect(() => {
         setSchema([]); setData([]); setTotalRows(0); setCurrentPage(1); setError(null); setPrimaryKeyName(null);
         setLoadingSchema(true); setLoadingData(true);
@@ -44,12 +40,10 @@ const GalleryView: React.FC<GalleryViewProps> = ({ dbId, tableName }) => {
             .finally(() => setLoadingSchema(false));
 
     }, [dbId, tableName]);
-
-    // 2c. FETCH DATA: Get paginated data based on current page
     useEffect(() => {
         if (loadingSchema || error || !dbId || !tableName) {
-             if (!loadingSchema && !error) setLoadingData(false); // Stop loading if schema failed or is empty
-            return; // Don't fetch if schema isn't ready or there was an error
+             if (!loadingSchema && !error) setLoadingData(false);
+            return;
         }
 
         setLoadingData(true);
@@ -61,7 +55,6 @@ const GalleryView: React.FC<GalleryViewProps> = ({ dbId, tableName }) => {
                 if (!response || !Array.isArray(response.data) || typeof response.total !== 'number') {
                     throw new Error("Invalid data format received.");
                 }
-                // Add unique key for React list rendering
                  const processedData = response.data.map((row, index) => ({
                     ...row,
                     gallery_view_key: primaryKeyName && row[primaryKeyName] != null
@@ -74,14 +67,10 @@ const GalleryView: React.FC<GalleryViewProps> = ({ dbId, tableName }) => {
             .catch((err) => { setError(`Data Error: ${err.message}`); setData([]); setTotalRows(0); })
             .finally(() => setLoadingData(false));
 
-    }, [dbId, tableName, currentPage, loadingSchema, schema, error, primaryKeyName]); // Dependencies
-
-    // 2d. PAGINATION HANDLER: Update current page state
+    }, [dbId, tableName, currentPage, loadingSchema, schema, error, primaryKeyName]);
     const handlePageChange = (page: number) => {
         setCurrentPage(page);
     };
-
-    // 2e. VALUE FORMATTER: Helper to display different data types nicely
     const formatDisplayValue = (value: any, columnType: string): string => {
         const colTypeLC = columnType.toLowerCase().split('(')[0].split(' ')[0];
         const dateTypesLC = ['date', 'timestamp', 'datetime', 'timestamptz', 'timestamp with time zone'];
