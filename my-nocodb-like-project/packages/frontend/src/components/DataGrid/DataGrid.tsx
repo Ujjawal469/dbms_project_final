@@ -79,7 +79,7 @@ const ACCEPTED_UPLOAD_TYPES = [
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 
     
 ];
-const ACCEPTED_UPLOAD_EXTENSIONS_STRING = ".csv, .xls, .xlsx"; 
+const ACCEPTED_UPLOAD_EXTENSIONS_STRING = ".csv"; 
 
 const DataGrid: React.FC<DataGridProps> = ({ dbId, tableName }) => {
     const [schema, setSchema] = useState<ApiColumnSchema[]>([]);
@@ -1405,7 +1405,7 @@ const DataGrid: React.FC<DataGridProps> = ({ dbId, tableName }) => {
                                 maxTagCount="responsive" // Optional: prevent overflow
                             >
                                 {/* Options remain the same */}
-                                {schema.map(col => ( <Option key={col.name} value={col.name}>{col.name}</Option> ))}
+                                {schema.filter(col => col.name !== 'serial_num').map(col => ( <Option key={col.name} value={col.name}>{col.name}</Option> ))}
                             </Select>
                         </Space>
                     )}
